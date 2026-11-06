@@ -1,0 +1,134 @@
+
+# ============================================================
+# Shared CI Template: Semantic Version Calculation
+#
+# Job:
+#   version:calculate
+#
+# Required variables:
+#   VERSION_BUMP: major | minor | patch
+#
+# Optional variables:
+#   VERSION_PREFIX: v
+#   VERSION_INITIAL: 1.0.0
+#
+# Outputs (dotenv):
+#   VERSION
+#   GIT_TAG
+#
+# Versioning rules:
+#   !feat: major
+#   feat:   minor
+#   fix:    patch
+#
+# VERSION_BUMP overrides automatic commit detection.
+# ============================================================
+
+variables:
+  VERSION_PREFIX: "v"
+  VERSION_INITIAL: "1.0.0"
+
+version:calculate:
+  stage: prepare
+  image: alpine:3.21
+
+  before_script:
+    - apk add --no-cache git
+
+  script:
+    - |
+      set -eu
+
+      echo "Fetching Git tags..."
+      git fetch --force --tags origin
+
+      LATEST_TAG=$(
+        git tag --sort=-version:refname |
+        grep -E "^${VERSION_PREFIX}[0-9]+\.[0-9]+\.[0-9]+$" |
+        head -n 1 || true
+      )
+
+      if [ -z "$LATEST_TAG" ]; then
+        CURRENT_VERSION="$VERSION_INITIAL"
+        echo "No previous version found."
+      else
+        CURRENT_VERSION="${LATEST_TAG#"$VERSION_PREFIX"}"
+      fi
+
+      MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+      MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+      PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+      # Determine version bump
+      if [ -n "${VERSION_BUMP:-}" ]; then
+        BUMP="$VERSION_BUMP"
+      else
+        case "$CI_COMMIT_TITLE" in
+          "!"*)
+            BUMP="major"
+            ;;
+          feat:*)
+            BUMP="minor"
+            ;;
+          fix:*)
+            BUMP="patch"
+            ;;
+          *)
+            BUMP="patch"
+            ;;
+        esac
+      fi
+
+      echo "Version bump: $BUMP"
+
+      case "$BUMP" in
+        major)
+          MAJOR=$((MAJOR + 1))
+          MINOR=0
+          PATCH=0
+          ;;
+        minor)
+          MINOR=$((MINOR + 1))
+          PATCH=0
+          ;;
+        patch)
+          PATCH=$((PATCH + 1))
+          ;;
+        *)
+          echo "ERROR: Invalid VERSION_BUMP: $BUMP"
+          exit 1
+          ;;
+      esac
+
+      VERSION="${MAJOR}.${MINOR}.${PATCH}"
+      GIT_TAG="${VERSION_PREFIX}${VERSION}"
+
+      echo "============================================"
+      echo "Commit: ${CI_COMMIT_TITLE}"
+      echo "Previous tag: ${LATEST_TAG:-none}"
+      echo "Version bump: ${BUMP}"
+      echo "New version: ${VERSION}"
+      echo "Git tag: ${GIT_TAG}"
+      echo "============================================"
+
+      # Check whether the calculated tag already exists
+      if git ls-remote --exit-code --tags origin \
+        "refs/tags/${GIT_TAG}" >/dev/null 2>&1; then
+        echo "ERROR: Tag ${GIT_TAG} already exists."
+        exit 1
+      fi
+
+      # Export variables for downstream jobs
+      {
+        echo "VERSION=${VERSION}"
+        echo "GIT_TAG=${GIT_TAG}"
+      } > version.env
+
+  artifacts:
+    reports:
+      dotenv: version.env
+    expire_in: 1 week
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
