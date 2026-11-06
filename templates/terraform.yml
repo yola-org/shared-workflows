@@ -1,0 +1,107 @@
+
+# Reusable Terraform CI/CD template
+#
+# Required project configuration:
+#   TF_ROOT: Directory containing Terraform configuration
+#   TF_ENVIRONMENTS: Environment directories (e.g. dev prod)
+#
+# Required CI/CD variables:
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+#
+# Optional:
+#   AWS_DEFAULT_REGION
+#   TF_PLAN_EXPIRE_IN
+
+variables:
+  TF_ROOT: "."
+  TF_ENVIRONMENTS: "dev prod"
+  TF_VERSION: "1.11"
+  AWS_DEFAULT_REGION: "ca-central-1"
+  TF_PLAN_EXPIRE_IN: "1 week"
+
+.terraform_base:
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
+  before_script:
+    - terraform version
+
+terraform:validate:
+  extends: .terraform_base
+  stage: validate
+  script:
+    - terraform fmt -check -recursive
+    - |
+      set -e
+      for env in $TF_ENVIRONMENTS; do
+        DIR="${TF_ROOT}/${env}"
+
+        if [ -d "$DIR" ]; then
+          echo "Validating ${DIR}"
+          (
+            cd "$DIR"
+            terraform init -backend=false
+            terraform validate
+          )
+        fi
+      done
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+.terraform_plan:
+  extends: .terraform_base
+  stage: validate
+  script:
+    - cd "${TF_ROOT}/${TF_ENV}"
+    - terraform init
+    - terraform plan -input=false -out=tfplan
+  artifacts:
+    paths:
+      - ${TF_ROOT}/${TF_ENV}/tfplan
+    expire_in: $TF_PLAN_EXPIRE_IN
+
+.terraform_apply:
+  extends: .terraform_base
+  stage: deploy
+  script:
+    - cd "${TF_ROOT}/${TF_ENV}"
+    - terraform init
+    - terraform apply -input=false -auto-approve tfplan
+  dependencies:
+    - terraform:${TF_ENV}:plan
+
+terraform:dev:plan:
+  extends: .terraform_plan
+  variables:
+    TF_ENV: dev
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+
+terraform:prod:plan:
+  extends: .terraform_plan
+  variables:
+    TF_ENV: prod
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "prod"'
+
+terraform:dev:apply:
+  extends: .terraform_apply
+  variables:
+    TF_ENV: dev
+  environment:
+    name: dev
+  when: on_success
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+
+terraform:prod:apply:
+  extends: .terraform_apply
+  variables:
+    TF_ENV: prod
+  environment:
+    name: prod
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "prod"'
