@@ -1,0 +1,14 @@
+
+stages:
+  - test
+  - secret-detection
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+sast:
+  stage: test
+
+secret_detection:
+  stage: secret-detection
