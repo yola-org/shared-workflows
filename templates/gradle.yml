@@ -1,0 +1,28 @@
+# Gradle test + build. Override GRADLE_IMAGE per project if needed.
+
+.gradle-base:
+  image: $GRADLE_IMAGE
+  variables:
+    GRADLE_IMAGE: "gradle:8.10-jdk17"
+
+.gradle-test:
+  extends: .gradle-base
+  stage: test
+  script:
+    - chmod +x gradlew
+    - ./gradlew clean test
+
+.gradle-build:
+  extends: .gradle-base
+  stage: build
+  needs:
+    - job: calculate-version        # rename here if your version job has another name
+      artifacts: true
+  script:
+    - chmod +x gradlew
+    - ./gradlew clean build -Pversion="$VERSION"
+  artifacts:
+    paths:
+      - build/libs/
+      - docker/Dockerfile
+    expire_in: 1 day
