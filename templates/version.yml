@@ -95,17 +95,18 @@ variables:
       echo "Latest matching tag: ${LATEST_TAG:-none}"
 
       # Determine version bump
+      # Determine version bump
       if [ -n "${VERSION_BUMP:-}" ]; then
         BUMP="$VERSION_BUMP"
       else
         case "${CI_COMMIT_TITLE:-}" in
-          !feat:*)
+          !feat:*|!feat\(*\):*)
             BUMP="major"
             ;;
-          feat:*)
+          feat:*|feat\(*\):*)
             BUMP="minor"
             ;;
-          fix:*)
+          fix:*|fix\(*\):*)
             BUMP="patch"
             ;;
           *)
