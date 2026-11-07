@@ -25,7 +25,7 @@
 # ============================================================
 
 variables:
-  VERSION_PREFIX: "v"
+  VERSION_SUFFIX: ""
   VERSION_INITIAL: "1.0.0"
 
 .version:
@@ -43,17 +43,21 @@ variables:
       git fetch --force --tags origin
 
       LATEST_TAG=$(
-        git tag --sort=-version:refname |
-        grep -E "^${VERSION_PREFIX}[0-9]+\.[0-9]+\.[0-9]+$" |
-        head -n 1 || true
+        git tag -l "*${VERSION_SUFFIX}" --sort=-version:refname |
+        awk -v suffix="$VERSION_SUFFIX" '
+          {
+            version = $0
+            if (suffix != "") version = substr($0, 1, length($0) - length(suffix))
+            if (version ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) {
+              print $0
+              exit
+            }
+          }
+        '
       )
 
-      if [ -z "$LATEST_TAG" ]; then
-        CURRENT_VERSION="$VERSION_INITIAL"
-        echo "No previous version found."
-      else
-        CURRENT_VERSION="${LATEST_TAG#"$VERSION_PREFIX"}"
-      fi
+      CURRENT_VERSION="${LATEST_TAG%"$VERSION_SUFFIX"}"
+      [ -n "$CURRENT_VERSION" ] || CURRENT_VERSION="$VERSION_INITIAL"
 
       MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
       MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
@@ -101,7 +105,7 @@ variables:
       esac
 
       VERSION="${MAJOR}.${MINOR}.${PATCH}"
-      GIT_TAG="${VERSION_PREFIX}${VERSION}"
+      GIT_TAG="${VERSION}${VERSION_SUFFIX}"
 
       echo "============================================"
       echo "Commit: ${CI_COMMIT_TITLE}"
