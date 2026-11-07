@@ -28,7 +28,7 @@ variables:
   VERSION_PREFIX: "v"
   VERSION_INITIAL: "1.0.0"
 
-version:calculate:
+.version:
   stage: prepare
   image: alpine:3.21
 
