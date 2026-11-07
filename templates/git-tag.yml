@@ -1,27 +1,22 @@
-
 # ============================================================
 # Shared CI Template: Git Tag Creation
 #
 # Job:
-#   git-tag:create
+#   .git-tag
 #
 # Required:
-#   VERSION
-#   GIT_TAG
-#   ACCESS_TOKEN
+#   VERSION, GIT_TAG   (from version:calculate via dotenv)
+#   ACCESS_TOKEN       (project/group access token with write_repository)
 #
-# ACCESS_TOKEN:
-#   GitLab project/group access token with write_repository.
+# Optional (set in the extending job's `variables:`):
+#   GIT_TAG_PREFIX  - prepended to the calculated tag     (prod- -> prod-v1.2.0)
+#   GIT_TAG_SUFFIX  - appended to the calculated tag      (-rc   -> v1.2.0-rc)
+#   GIT_TAG_NAME    - full override, ignores the two above
+#                     can reference $VERSION               (release-$VERSION)
 #
 # Behavior:
-#   - Creates an annotated Git tag.
-#   - Pushes the tag to the current repository.
-#   - Runs only on the default branch.
-#   - Runs after previous pipeline stages succeed.
-#
-# Expected:
-#   version:calculate must provide VERSION and GIT_TAG
-#   through a dotenv artifact.
+#   - Creates an annotated Git tag and pushes it without starting a pipeline.
+#   - Runs only on the default branch (override `rules` in the consumer).
 # ============================================================
 
 include:
@@ -32,6 +27,11 @@ include:
 .git-tag:
   stage: release
   image: alpine:3.21
+
+  variables:
+    GIT_TAG_PREFIX: ""
+    GIT_TAG_SUFFIX: ""
+    GIT_TAG_NAME: ""
 
   before_script:
     - apk add --no-cache git
@@ -44,7 +44,19 @@ include:
       : "${GIT_TAG:?GIT_TAG is required}"
       : "${ACCESS_TOKEN:?ACCESS_TOKEN is required}"
 
-      echo "Preparing Git tag ${GIT_TAG}..."
+      # Resolve the final tag name
+      if [ -n "${GIT_TAG_NAME:-}" ]; then
+        FINAL_TAG="$GIT_TAG_NAME"
+      else
+        FINAL_TAG="${GIT_TAG_PREFIX:-}${GIT_TAG}${GIT_TAG_SUFFIX:-}"
+      fi
+
+      if ! git check-ref-format "refs/tags/${FINAL_TAG}"; then
+        echo "ERROR: '${FINAL_TAG}' is not a valid Git tag name."
+        exit 1
+      fi
+
+      echo "Preparing Git tag ${FINAL_TAG}..."
 
       git config user.name "GitLab CI Bot"
       git config user.email "ci-bot@example.com"
@@ -53,25 +65,23 @@ include:
       git fetch --force --tags origin
 
       if git ls-remote --exit-code --tags origin \
-        "refs/tags/${GIT_TAG}" >/dev/null 2>&1; then
-        echo "ERROR: Tag ${GIT_TAG} already exists."
+        "refs/tags/${FINAL_TAG}" >/dev/null 2>&1; then
+        echo "ERROR: Tag ${FINAL_TAG} already exists."
         exit 1
       fi
 
       # Create annotated tag
-      git tag -a "$GIT_TAG" \
-        -m "Release ${VERSION}"
+      git tag -a "$FINAL_TAG" -m "Release ${VERSION}"
 
-      # Push tag to current repository
-      git push \
+      # Push tag without triggering a pipeline
+      git push -o ci.skip \
         "https://oauth2:${ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" \
-        "$GIT_TAG"
+        "$FINAL_TAG"
 
       echo "============================================"
       echo "GIT TAG CREATED SUCCESSFULLY"
-      echo "============================================"
       echo "Version: ${VERSION}"
-      echo "Tag: ${GIT_TAG}"
+      echo "Tag: ${FINAL_TAG}"
       echo "============================================"
 
   rules:
