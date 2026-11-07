@@ -51,9 +51,10 @@ include:
         FINAL_TAG="${GIT_TAG_PREFIX:-}${GIT_TAG}${GIT_TAG_SUFFIX:-}"
       fi
 
-      if ! git check-ref-format "refs/tags/${FINAL_TAG}"; then
-        echo "ERROR: '${FINAL_TAG}' is not a valid Git tag name."
-        exit 1
+      if git ls-remote --exit-code --tags origin \
+        "refs/tags/${FINAL_TAG}" >/dev/null 2>&1; then
+        echo "Tag ${FINAL_TAG} already exists; skipping."
+        exit 0
       fi
 
       echo "Preparing Git tag ${FINAL_TAG}..."
