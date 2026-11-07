@@ -24,6 +24,11 @@
 #   through a dotenv artifact.
 # ============================================================
 
+include:
+  - project: "tech1212145/ci-templates"
+    ref: master                      # keep identical to the ref in the consumer pipeline
+    file: templates/version.yml
+
 git-tag:create:
   stage: release
   image: alpine:3.21
