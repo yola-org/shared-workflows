@@ -29,7 +29,7 @@ include:
     ref: master                      # keep identical to the ref in the consumer pipeline
     file: templates/version.yml
 
-git-tag:create:
+.git-tag:
   stage: release
   image: alpine:3.21
 
