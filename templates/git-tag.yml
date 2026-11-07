@@ -51,10 +51,9 @@ include:
         FINAL_TAG="${GIT_TAG_PREFIX:-}${GIT_TAG}${GIT_TAG_SUFFIX:-}"
       fi
 
-      if git ls-remote --exit-code --tags origin \
-        "refs/tags/${FINAL_TAG}" >/dev/null 2>&1; then
-        echo "Tag ${FINAL_TAG} already exists; skipping."
-        exit 0
+      if ! git check-ref-format "refs/tags/${FINAL_TAG}"; then
+        echo "ERROR: '${FINAL_TAG}' is not a valid Git tag name."
+        exit 1
       fi
 
       echo "Preparing Git tag ${FINAL_TAG}..."
@@ -67,8 +66,8 @@ include:
 
       if git ls-remote --exit-code --tags origin \
         "refs/tags/${FINAL_TAG}" >/dev/null 2>&1; then
-        echo "ERROR: Tag ${FINAL_TAG} already exists."
-        exit 1
+        echo "Tag ${FINAL_TAG} already exists; skipping."
+        exit 0
       fi
 
       # Create annotated tag
