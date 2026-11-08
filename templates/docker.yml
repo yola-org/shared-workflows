@@ -1,5 +1,23 @@
 # Docker build + push to ECR (versioned tag + latest). Default branch only.
+#
+# Depends on version.gitlab-ci.yml (same repo, same folder): the VERSION used
+# for the image tag comes from the `version:calculate` job defined there.
+# Include both files in the consuming repo:
+#
+#   include:
+#     - project: my-group/ci-templates
+#       ref: v1.0.0
+#       file:
+#         - /version.gitlab-ci.yml
+#         - /docker.gitlab-ci.yml
+#
+#   docker-build-push:
+#     extends: .docker-build-push-ecr
+#     variables:
+#       DOCKER_IMAGE_NAME: my-service
+#
 # Required: DOCKER_IMAGE_NAME (job var), DOCKER_REGISTRY + AWS_DEFAULT_REGION (CI/CD vars)
+# Optional: DOCKERFILE_PATH, DOCKER_BUILD_CONTEXT, VERSION_SKIP (see version.gitlab-ci.yml)
 
 .docker-build-push-ecr:
   stage: release
@@ -17,7 +35,7 @@
     DOCKERFILE_PATH: "docker/Dockerfile"
     DOCKER_BUILD_CONTEXT: "."
   needs:
-    - job: calculate-version
+    - job: version:calculate
       artifacts: true
     - job: build
       artifacts: true
@@ -28,6 +46,7 @@
     - |
       set -eu
 
+      : "${VERSION:?VERSION is required (from version:calculate)}"
       : "${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION is required}"
       : "${DOCKER_REGISTRY:?DOCKER_REGISTRY is required}"
       : "${DOCKER_IMAGE_NAME:?DOCKER_IMAGE_NAME is required}"
@@ -49,4 +68,6 @@
       docker push "${IMAGE_URI}:${VERSION}"
       docker push "${IMAGE_URI}:latest"
   rules:
+    - if: '$VERSION_SKIP == "true"'
+      when: never
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
