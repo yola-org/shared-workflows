@@ -1,15 +1,14 @@
 # Docker build + push to ECR (versioned tag + latest). Default branch only.
 #
-# Depends on version.gitlab-ci.yml (same repo, same folder): the VERSION used
-# for the image tag comes from the `version:calculate` job defined there.
-# Include both files in the consuming repo:
+# Depends on templates/version.yml: the VERSION used for the image tag comes
+# from the `version:calculate` job. Include BOTH files in the consuming repo:
 #
 #   include:
 #     - project: my-group/ci-templates
 #       ref: v1.0.0
 #       file:
-#         - /version.gitlab-ci.yml
-#         - /docker.gitlab-ci.yml
+#         - /templates/version.yml
+#         - /templates/docker.yml
 #
 #   docker-build-push:
 #     extends: .docker-build-push-ecr
@@ -17,13 +16,11 @@
 #       DOCKER_IMAGE_NAME: my-service
 #
 # Required: DOCKER_IMAGE_NAME (job var), DOCKER_REGISTRY + AWS_DEFAULT_REGION (CI/CD vars)
-# Optional: DOCKERFILE_PATH, DOCKER_BUILD_CONTEXT, VERSION_SKIP (see version.gitlab-ci.yml)
-
-include:
-  - project: 'tech1212145/ci-templates'
-    ref: master
-    file:
-      - '/templates/version.yml'
+# Optional: DOCKERFILE_PATH, DOCKER_BUILD_CONTEXT, VERSION_SKIP (see version.yml)
+#
+# `version:calculate` and `build` are optional needs so this template can be
+# reused by repos that do not use semantic versioning or the Gradle template.
+# The job itself still fails fast if VERSION is missing.
 
 .docker-build-push-ecr:
   stage: release
@@ -46,6 +43,7 @@ include:
       optional: true
     - job: build
       artifacts: true
+      optional: true
   resource_group: release-$CI_PROJECT_NAME
   before_script:
     - apk add --no-cache aws-cli

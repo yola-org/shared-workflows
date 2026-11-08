@@ -1,10 +1,14 @@
 # Opens an MR in the infra repo bumping an image tag in a tfvars file.
 # Job variables to set: INFRA_COMPONENT, INFRA_TF_VAR_KEY
 # Optional: INFRA_PROJECT_PATH, INFRA_TARGET_BRANCH, INFRA_TARGET_FILE, INFRA_ENV_LABEL
+#
+# Requires VERSION from templates/version.yml (`version:calculate`).
+# Re-running the job is safe: the branch is reset and an existing open MR is
+# reused instead of failing.
 
 .update-infra-image-tag:
   stage: release
-  image: alpine:latest
+  image: alpine:3.21
   variables:
     INFRA_PROJECT_PATH: "aws-infra"
     INFRA_TARGET_BRANCH: "dev"
@@ -14,12 +18,15 @@
     - job: version:calculate
       optional: true
       artifacts: true
+  resource_group: infra-bump-${INFRA_PROJECT_PATH}-${INFRA_COMPONENT}
   before_script:
     - apk add --no-cache git curl jq
   script:
     - |
       set -eu
 
+      : "${VERSION:?VERSION is required (from version:calculate)}"
+      : "${ACCESS_TOKEN:?ACCESS_TOKEN is required}"
       : "${INFRA_COMPONENT:?INFRA_COMPONENT is required}"
       : "${INFRA_TF_VAR_KEY:?INFRA_TF_VAR_KEY is required}"
 
@@ -27,12 +34,14 @@
       INFRA_FULL_PATH="${CI_PROJECT_NAMESPACE}/${INFRA_PROJECT_PATH}"
       INFRA_REPO_URL="https://oauth2:${ACCESS_TOKEN}@${CI_SERVER_HOST}/${INFRA_FULL_PATH}.git"
 
-      git clone "$INFRA_REPO_URL" infra-repo
+      # Shallow clone of the target branch; only one file is edited.
+      git clone --depth 1 --branch "$INFRA_TARGET_BRANCH" "$INFRA_REPO_URL" infra-repo
       cd infra-repo
 
-      git config user.name "GitLab CI Bot"
-      git config user.email "ci-bot@example.com"
-      git checkout -b "$BRANCH_NAME" "origin/${INFRA_TARGET_BRANCH}"
+      git config user.name "${GIT_USER_NAME:-GitLab CI Bot}"
+      git config user.email "${GIT_USER_EMAIL:-ci-bot@example.com}"
+      # -B resets a leftover branch from a previous failed run.
+      git checkout -B "$BRANCH_NAME"
 
       [ -f "$INFRA_TARGET_FILE" ] || { echo "ERROR: ${INFRA_TARGET_FILE} not found"; exit 1; }
 
@@ -45,10 +54,20 @@
 
       git add "$INFRA_TARGET_FILE"
       git commit -m "chore(${INFRA_ENV_LABEL}): update ${INFRA_COMPONENT} version to ${VERSION}"
-      git push origin "$BRANCH_NAME"
+      git push --force origin "$BRANCH_NAME"
 
       ENCODED_PATH=$(printf '%s' "$INFRA_FULL_PATH" | jq -sRr @uri)
       API_URL="${CI_API_V4_URL}/projects/${ENCODED_PATH}/merge_requests"
+
+      # Reuse an existing open MR so re-running the job is idempotent.
+      EXISTING_MR=$(curl --silent --header "PRIVATE-TOKEN: ${ACCESS_TOKEN}" \
+        "${API_URL}?state=opened&source_branch=${BRANCH_NAME}" |
+        jq -r '.[0].web_url // empty')
+
+      if [ -n "$EXISTING_MR" ]; then
+        echo "MR already exists: $EXISTING_MR"
+        exit 0
+      fi
 
       PAYLOAD=$(jq -n \
         --arg source "$BRANCH_NAME" \
@@ -69,4 +88,6 @@
         echo "Failed to create MR:"; echo "$RESPONSE"; exit 1
       fi
   rules:
+    - if: '$VERSION_SKIP == "true"'
+      when: never
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

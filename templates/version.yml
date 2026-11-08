@@ -18,9 +18,7 @@
 #
 #   version:tag:
 #     extends: .version:tag
-#     variables:
-#       VERSION_PREFIX: "dev-"
-#     needs: [version:calculate]
+#     needs: [version:calculate]        # needed for VERSION / GIT_TAG
 #     rules:
 #       - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 #
@@ -66,6 +64,9 @@
 .version:calculate:
   stage: .pre
   image: alpine:3.21
+  variables:
+    # Full history + all tags, so the latest version is always correct.
+    GIT_DEPTH: "0"
 
   before_script:
     - apk add --no-cache git
@@ -225,8 +226,21 @@
   stage: .post
   image: alpine:3.21
 
-  needs:
-    - version:calculate
+  # Default rules keep the template safe: a tag is only created on the default
+  # branch, where `version:calculate` exists. Override `rules` in the consuming
+  # job for another branch (for example `dev` / `prod`).
+  rules:
+    - if: $VERSION_SKIP == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+  # No default `needs` on purpose:
+  # - A job without `needs` inherits dotenv variables from every earlier job,
+  #   so VERSION / GIT_TAG are available without hard-coding a version job name.
+  # - Add `needs` in the consuming job when the tag must wait for a specific job
+  #   (for example the image push). Remember that dotenv variables then only
+  #   come from the jobs listed in `needs`.
+  resource_group: version-tag-$CI_PROJECT_NAME
 
   before_script:
     - apk add --no-cache git
@@ -282,20 +296,29 @@
 
 
 # ============================================================
-# Ready-to-run jobs (no `extends` needed in consuming repos)
+# Ready-to-run job
 #
-# Just include this file. By default both jobs run on the
-# default branch only. Configure with CI/CD or pipeline variables:
+# Just include this file and `version:calculate` runs on the default branch.
+# `.version:tag` is intentionally NOT exposed as a ready-to-run job: each repo
+# decides when to tag (usually after a successful deploy) by extending it.
+#
+# Configure with CI/CD or pipeline variables:
 #
 #   VERSION_PREFIX   "dev-" | "prod-" | ""
 #   VERSION_BUMP     major | minor | patch
-#   VERSION_SKIP     "true" disables both jobs
+#   VERSION_SKIP     "true" disables the job
 #
 # To change the rules in a repo, redefine the job by name:
 #
 #   version:calculate:
 #     rules:
 #       - if: $CI_COMMIT_BRANCH == "develop"
+#
+# IMPORTANT: `rules` entries are OR-ed and the first match wins. If none of
+# them match, the job is NOT added to the pipeline. A list containing only a
+# conditional `when: never` entry therefore excludes the job from every
+# pipeline. Always finish the list with a positive rule (or
+# `- when: on_success`).
 # ============================================================
 
 version:calculate:
@@ -303,3 +326,4 @@ version:calculate:
   rules:
     - if: $VERSION_SKIP == "true"
       when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
