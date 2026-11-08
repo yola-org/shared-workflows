@@ -43,6 +43,7 @@ include:
   needs:
     - job: version:calculate
       artifacts: true
+      optional: true
     - job: build
       artifacts: true
   resource_group: release-$CI_PROJECT_NAME
