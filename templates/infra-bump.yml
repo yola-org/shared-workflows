@@ -11,7 +11,7 @@
     INFRA_TARGET_FILE: "envs/dev/terraform.tfvars"
     INFRA_ENV_LABEL: "dev"
   needs:
-    - job: calculate-version
+    - job: version:calculate
       artifacts: true
     - job: git-tag
   before_script:
