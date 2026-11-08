@@ -27,6 +27,7 @@ include:
       artifacts: true
       optional: true
   script:
+    - java -version
     - chmod +x gradlew
     - ./gradlew clean build -Pversion="${VERSION:-0.0.0-SNAPSHOT}"
   artifacts:
