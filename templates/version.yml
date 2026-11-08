@@ -303,4 +303,3 @@ version:calculate:
   rules:
     - if: $VERSION_SKIP == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
