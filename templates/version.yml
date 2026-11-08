@@ -225,6 +225,9 @@
   stage: .post
   image: alpine:3.21
 
+  needs:
+    - version:calculate
+
   before_script:
     - apk add --no-cache git
 
