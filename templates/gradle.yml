@@ -16,7 +16,7 @@
   extends: .gradle-base
   stage: build
   needs:
-    - job: calculate-version        # rename here if your version job has another name
+    - job: version:calculate        # rename here if your version job has another name
       artifacts: true
   script:
     - chmod +x gradlew
