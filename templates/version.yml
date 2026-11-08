@@ -1,45 +1,70 @@
-
 # ============================================================
 # Shared CI Template: Semantic Versioning & Git Tag Creation
 #
+# Host this file in a shared project (e.g. my-group/ci-templates)
+# and include it from any other repo:
+#
+#   include:
+#     - project: my-group/ci-templates
+#       ref: v1.0.0                      # pin a tag, not main
+#       file: /templates/version.yml
+#
+#   version:calculate:
+#     extends: .version:calculate
+#     variables:
+#       VERSION_PREFIX: "dev-"
+#     rules:
+#       - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#
+#   version:tag:
+#     extends: .version:tag
+#     variables:
+#       VERSION_PREFIX: "dev-"
+#     needs: [version:calculate]
+#     rules:
+#       - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#
 # Templates:
-#   .version:calculate
-#   .version:tag
+#   .version:calculate   computes the next version, exports VERSION / GIT_TAG
+#   .version:tag         creates and pushes the annotated Git tag
 #
 # Required variables:
-#   ACCESS_TOKEN       GitLab token with write_repository
+#   ACCESS_TOKEN         GitLab token with write_repository
+#                        (set as a masked CI/CD variable in each repo or group)
 #
 # Optional variables:
-#   VERSION_PREFIX     "" | "dev-" | "prod-"
-#   VERSION_INITIAL   1.0.0
-#   VERSION_BUMP      major | minor | patch
+#   VERSION_PREFIX       "" | "dev-" | "prod-"      (default: "")
+#   VERSION_INITIAL      first version              (default: 1.0.0)
+#   VERSION_BUMP         major | minor | patch      (overrides commit detection)
+#   GIT_USER_NAME        tag author name            (default: GitLab CI Bot)
+#   GIT_USER_EMAIL       tag author email           (default: ci-bot@example.com)
 #
-# Outputs (dotenv):
-#   VERSION
-#   GIT_TAG
+# Outputs (dotenv, available to later jobs):
+#   VERSION              e.g. 1.2.0
+#   GIT_TAG              e.g. dev-1.2.0
 #
-# Versioning rules:
-#   !feat:  major
-#   feat:   minor
-#   fix:    patch
+# Versioning rules (from the commit title):
+#   !feat: / feat!:   major
+#   feat:             minor
+#   anything else     patch
 #
 # VERSION_BUMP overrides automatic commit detection.
 #
 # Independent version streams:
-#   dev-1.0.0 -> dev-1.1.0
+#   dev-1.0.0  -> dev-1.1.0
 #   prod-1.0.0 -> prod-1.1.0
+#
+# Stages: .version:calculate runs in .pre and .version:tag in .post,
+# so consuming repos do not need to declare any custom stages.
+# Override `stage:` in your own job if you need different placement.
 # ============================================================
-
-variables:
-  VERSION_PREFIX: ""
-  VERSION_INITIAL: "1.0.0"
 
 # ============================================================
 # Calculate Semantic Version
 # ============================================================
 
 .version:calculate:
-  stage: prepare
+  stage: .pre
   image: alpine:3.21
 
   before_script:
@@ -54,7 +79,7 @@ variables:
 
       echo "============================================"
       echo "Calculating semantic version"
-      echo "Environment prefix: ${VERSION_PREFIX}"
+      echo "Environment prefix: ${VERSION_PREFIX:-<none>}"
       echo "============================================"
 
       # Validate initial version
@@ -95,19 +120,15 @@ variables:
       echo "Latest matching tag: ${LATEST_TAG:-none}"
 
       # Determine version bump
-      # Determine version bump
       if [ -n "${VERSION_BUMP:-}" ]; then
         BUMP="$VERSION_BUMP"
       else
         case "${CI_COMMIT_TITLE:-}" in
-          !feat:*|!feat\(*\):*)
+          '!feat:'*|'!feat('*'):'*|feat'!:'*|feat'('*')!:'*)
             BUMP="major"
             ;;
           feat:*|feat\(*\):*)
             BUMP="minor"
-            ;;
-          fix:*|fix\(*\):*)
-            BUMP="patch"
             ;;
           *)
             BUMP="patch"
@@ -127,17 +148,15 @@ variables:
       # First release starts at VERSION_INITIAL.
       # Subsequent releases increment the latest version.
       if [ -z "$LATEST_TAG" ]; then
-
         VERSION="$VERSION_INITIAL"
         echo "No previous tag found. Using initial version."
-
       else
-
         CURRENT_VERSION="${LATEST_TAG#"$VERSION_PREFIX"}"
 
-        IFS='.' read -r MAJOR MINOR PATCH <<EOF
-      $CURRENT_VERSION
-      EOF
+        MAJOR="${CURRENT_VERSION%%.*}"
+        REST="${CURRENT_VERSION#*.}"
+        MINOR="${REST%%.*}"
+        PATCH="${REST#*.}"
 
         echo "Current version: ${CURRENT_VERSION}"
         echo "Version bump: ${BUMP}"
@@ -158,7 +177,6 @@ variables:
         esac
 
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
-
       fi
 
       # Construct complete Git tag
@@ -204,7 +222,7 @@ variables:
 # ============================================================
 
 .version:tag:
-  stage: release
+  stage: .post
   image: alpine:3.21
 
   before_script:
@@ -214,7 +232,7 @@ variables:
     - |
       set -eu
 
-      : "${VERSION:?VERSION is required}"
+      : "${VERSION:?VERSION is required (run a job extending .version:calculate first)}"
       : "${GIT_TAG:?GIT_TAG is required}"
       : "${ACCESS_TOKEN:?ACCESS_TOKEN is required}"
 
@@ -231,8 +249,8 @@ variables:
       fi
 
       # Git identity
-      git config user.name "GitLab CI Bot"
-      git config user.email "ci-bot@example.com"
+      git config user.name "${GIT_USER_NAME:-GitLab CI Bot}"
+      git config user.email "${GIT_USER_EMAIL:-ci-bot@example.com}"
 
       # Fetch remote tags
       git fetch --force --tags origin
@@ -258,3 +276,28 @@ variables:
       echo "Version: ${VERSION}"
       echo "Tag: ${GIT_TAG}"
       echo "============================================"
+
+
+# ============================================================
+# Ready-to-run jobs (no `extends` needed in consuming repos)
+#
+# Just include this file. By default both jobs run on the
+# default branch only. Configure with CI/CD or pipeline variables:
+#
+#   VERSION_PREFIX   "dev-" | "prod-" | ""
+#   VERSION_BUMP     major | minor | patch
+#   VERSION_SKIP     "true" disables both jobs
+#
+# To change the rules in a repo, redefine the job by name:
+#
+#   version:calculate:
+#     rules:
+#       - if: $CI_COMMIT_BRANCH == "develop"
+# ============================================================
+
+version:calculate:
+  extends: .version:calculate
+  rules:
+    - if: $VERSION_SKIP == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
