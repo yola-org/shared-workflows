@@ -1,4 +1,9 @@
 # Gradle test + build. Override GRADLE_IMAGE per project if needed.
+include:
+  - project: "tech1212145/ci-templates"
+    ref: master
+    file:
+      - templates/version.yml
 
 .gradle-base:
   image: $GRADLE_IMAGE
