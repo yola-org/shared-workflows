@@ -1,4 +1,4 @@
-# Gradle test + build. Override GRADLE_IMAGE per project if needed.
+# Gradle test + build (JDK 25). Override GRADLE_IMAGE per project if needed.
 include:
   - project: "tech1212145/ci-templates"
     ref: master
@@ -8,7 +8,7 @@ include:
 .gradle-base:
   image: $GRADLE_IMAGE
   variables:
-    GRADLE_IMAGE: "gradle:8.10-jdk17"
+    GRADLE_IMAGE: "gradle:9-jdk25"
 
 .gradle-test:
   extends: .gradle-base
@@ -21,11 +21,14 @@ include:
   extends: .gradle-base
   stage: build
   needs:
+    # version:calculate only exists on the default branch, so it is optional here.
+    # Other branches / MR pipelines build with the snapshot fallback below.
     - job: version:calculate        # rename here if your version job has another name
       artifacts: true
+      optional: true
   script:
     - chmod +x gradlew
-    - ./gradlew clean build -Pversion="$VERSION"
+    - ./gradlew clean build -Pversion="${VERSION:-0.0.0-SNAPSHOT}"
   artifacts:
     paths:
       - build/libs/
