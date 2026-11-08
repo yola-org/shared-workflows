@@ -19,6 +19,12 @@
 # Required: DOCKER_IMAGE_NAME (job var), DOCKER_REGISTRY + AWS_DEFAULT_REGION (CI/CD vars)
 # Optional: DOCKERFILE_PATH, DOCKER_BUILD_CONTEXT, VERSION_SKIP (see version.gitlab-ci.yml)
 
+include:
+  - project: 'tech1212145/ci-templates'
+    ref: master
+    file:
+      - '/templates/version.yml'
+
 .docker-build-push-ecr:
   stage: release
   image: docker:27.5.1-cli
