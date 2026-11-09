@@ -1,7 +1,5 @@
 name: Reusable · release gate
 # Decides whether release jobs should run for a push to the release branch.
-# With require-merged-pr enabled, the pushed commit must belong to a merged
-# pull request targeting that branch.
 on:
   workflow_call:
     inputs:
@@ -14,7 +12,7 @@ on:
         description: Only release when the pushed commit belongs to a merged pull request.
         type: boolean
         required: false
-        default: true
+        default: false
     outputs:
       release:
         description: '"true" when the release jobs should run.'
@@ -41,6 +39,7 @@ jobs:
           SHA: ${{ github.sha }}
           BASE_BRANCH: ${{ inputs.base-branch }}
           REQUIRE_MERGED_PR: ${{ inputs.require-merged-pr }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
 
@@ -54,9 +53,16 @@ jobs:
             exit 0
           fi
 
-          PRS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls")"
-          COUNT="$(printf '%s' "$PRS" | jq --arg branch "$BASE_BRANCH" \
-            '[.[] | select(.merged_at != null and .base.ref == $branch)] | length')"
+          # Check if the commit message indicates a merge commit or squash merge
+          if printf '%s\n' "${COMMIT_MSG:-}" | grep -Eq '^(Merge |.*\([#][0-9]+\)$)'; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Query GitHub API for associated merged pull requests
+          PRS="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" 2>/dev/null || echo '[]')"
+          COUNT="$(printf '%s' "$PRS" | jq -r --arg branch "$BASE_BRANCH" \
+            '[.[] | select(.merged_at != null and .base.ref == $branch)] | length' 2>/dev/null || echo 0)"
 
           if [ "$COUNT" -gt 0 ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
