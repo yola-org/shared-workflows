@@ -1,0 +1,117 @@
+name: Reusable · Terraform apply
+# Applies a saved Terraform plan produced by reusable-terraform-plan.yml. The caller controls approval through the GitHub environment referenced here.
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Terraform root module directory, e.g. envs/dev.
+        type: string
+        required: true
+      artifact-name:
+        description: Name of the plan artifact produced by the plan workflow.
+        type: string
+        required: true
+      environment:
+        description: GitHub environment (use required reviewers for prod).
+        type: string
+        required: true
+      aws-region:
+        description: AWS region.
+        type: string
+        required: false
+        default: 'ca-central-1'
+      terraform-version:
+        description: Terraform CLI version.
+        type: string
+        required: false
+        default: '1.11.0'
+      env-vars:
+        description: Newline-separated KEY=VALUE pairs exported to the Terraform process.
+        type: string
+        required: false
+        default: ''
+      timeout-minutes:
+        description: Job timeout.
+        type: number
+        required: false
+        default: 30
+    secrets:
+      AWS_ROLE_ARN:
+        description: IAM role assumed through GitHub OIDC.
+        required: false
+      AWS_ACCESS_KEY_ID:
+        description: Static access key fallback.
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: Static secret key fallback.
+        required: false
+      AWS_SESSION_TOKEN:
+        description: Optional session token for temporary static credentials.
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    name: Apply
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.environment }}
+    env:
+      AWS_REGION: ${{ inputs.aws-region }}
+      AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: yola-org/ci-templates/.github/actions/aws-auth@main
+        with:
+          role-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+          access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Export Terraform variables
+        if: ${{ inputs.env-vars != '' }}
+        shell: bash
+        env:
+          EXTRA_ENV: ${{ inputs.env-vars }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$EXTRA_ENV" >> "$GITHUB_ENV"
+
+      - name: Prepare provider cache
+        shell: bash
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.terraform.d/plugin-cache
+          key: terraform-${{ runner.os }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-${{ runner.os }}-
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve tfplan

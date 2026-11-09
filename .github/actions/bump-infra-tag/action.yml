@@ -1,0 +1,133 @@
+name: Bump image tag in aws-infra
+description: >-
+  Clones the infra repository, updates an image tag in a tfvars file, pushes a
+  branch, and opens a pull request. Re-running is safe: the branch is reset and
+  an existing open PR is reused. Port of templates/infra-bump.yml.
+
+inputs:
+  component:
+    description: Component name used in the branch, commit and PR title.
+    required: true
+  tf-var-key:
+    description: Terraform variable to update, e.g. image_optimizer_image_tag.
+    required: true
+  version:
+    description: New image tag.
+    required: true
+  token:
+    description: Token with contents:write and pull-requests:write on the infra repository.
+    required: true
+  repository:
+    description: Infra repository in owner/name form.
+    required: false
+    default: 'yola-org/aws-infra'
+  target-branch:
+    description: Base branch for the pull request.
+    required: false
+    default: 'dev'
+  target-file:
+    description: tfvars file to edit.
+    required: false
+    default: 'envs/dev/terraform.tfvars'
+  env-label:
+    description: Environment label used in branch/commit/PR names.
+    required: false
+    default: 'dev'
+  user-name:
+    description: Commit author name.
+    required: false
+    default: 'github-actions[bot]'
+  user-email:
+    description: Commit author email.
+    required: false
+    default: '41898282+github-actions[bot]@users.noreply.github.com'
+
+outputs:
+  branch:
+    description: Branch that was pushed.
+    value: ${{ steps.bump.outputs.branch }}
+  pull_request_url:
+    description: URL of the created or reused pull request.
+    value: ${{ steps.bump.outputs.pull_request_url }}
+
+runs:
+  using: composite
+  steps:
+    - id: bump
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        TF_VAR_KEY: ${{ inputs.tf-var-key }}
+        VERSION: ${{ inputs.version }}
+        TOKEN: ${{ inputs.token }}
+        REPOSITORY: ${{ inputs.repository }}
+        TARGET_BRANCH: ${{ inputs.target-branch }}
+        TARGET_FILE: ${{ inputs.target-file }}
+        ENV_LABEL: ${{ inputs.env-label }}
+        GIT_USER_NAME: ${{ inputs.user-name }}
+        GIT_USER_EMAIL: ${{ inputs.user-email }}
+      run: |
+        set -euo pipefail
+
+        : "${COMPONENT:?component is required}"
+        : "${TF_VAR_KEY:?tf-var-key is required}"
+        : "${VERSION:?version is required}"
+        : "${TOKEN:?token is required}"
+
+        BRANCH="${ENV_LABEL}-${COMPONENT}-${VERSION}"
+
+        rm -rf infra-repo
+        git clone --depth 1 --branch "$TARGET_BRANCH" \
+          "https://x-access-token:${TOKEN}@github.com/${REPOSITORY}.git" infra-repo
+
+        cd infra-repo
+        git config user.name "${GIT_USER_NAME}"
+        git config user.email "${GIT_USER_EMAIL}"
+        git checkout -B "$BRANCH"
+
+        if [ ! -f "$TARGET_FILE" ]; then
+          echo "::error::${TARGET_FILE} not found in ${REPOSITORY}"
+          exit 1
+        fi
+
+        sed -i -E \
+          "s/(${TF_VAR_KEY}[[:space:]]*=[[:space:]]*\")[^\"]*(\")/\1${VERSION}\2/" \
+          "$TARGET_FILE"
+
+        if git diff --quiet; then
+          echo "::error::${TF_VAR_KEY} not found or already at ${VERSION} in ${TARGET_FILE}"
+          exit 1
+        fi
+
+        git add "$TARGET_FILE"
+        git commit -m "chore(${ENV_LABEL}): update ${COMPONENT} version to ${VERSION}"
+        git push --force origin "$BRANCH"
+
+        export GH_TOKEN="$TOKEN"
+
+        EXISTING_PR="$(
+          gh pr list --repo "$REPOSITORY" --head "$BRANCH" --state open \
+            --json url --jq '.[0].url // empty'
+        )"
+
+        if [ -n "$EXISTING_PR" ]; then
+          PR_URL="$EXISTING_PR"
+          echo "Reusing open pull request: ${PR_URL}"
+        else
+          PR_URL="$(
+            gh pr create --repo "$REPOSITORY" \
+              --base "$TARGET_BRANCH" --head "$BRANCH" \
+              --title "chore(${ENV_LABEL}): update ${COMPONENT} to ${VERSION}" \
+              --body "Automated version bump for ${COMPONENT} to ${VERSION}."
+          )"
+          echo "Created pull request: ${PR_URL}"
+        fi
+
+        {
+          echo "branch=${BRANCH}"
+          echo "pull_request_url=${PR_URL}"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Updated \`${TF_VAR_KEY}\` to \`${VERSION}\` in \`${REPOSITORY}:${TARGET_FILE}\`." >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "Pull request: ${PR_URL}" >> "$GITHUB_STEP_SUMMARY"

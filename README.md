@@ -1,8 +1,69 @@
-# Shared GitLab CI templates
+# Shared CI templates
 
-Reusable CI/CD building blocks for the Vestio projects. The templates are
-plain YAML files (not CI components), so they can be included from any project
-in the `tech1212145` group.
+Reusable CI/CD building blocks for the Vestio projects, for both GitHub
+Actions and GitLab CI. See [MIGRATION.md](./MIGRATION.md) for the migration
+plan, required secrets/variables, and the OIDC setup.
+
+## GitHub Actions
+
+Reusable workflows and composite actions live under `.github/`. Consumers in
+the `yola-org` organization call them with a literal reference; pin a tag
+instead of `main` once one exists.
+
+| Path | Purpose |
+|------|---------|
+| `.github/workflows/reusable-version.yml` | Semantic version calculation (+ optional tag) |
+| `.github/workflows/reusable-gradle.yml` | Gradle test + package (JDK 25) |
+| `.github/workflows/reusable-node-ci.yml` | Node lint/typecheck/build/e2e |
+| `.github/workflows/reusable-docker-ecr.yml` | Docker build + push to ECR |
+| `.github/workflows/reusable-terraform-plan.yml` | Terraform plan + saved plan artifact |
+| `.github/workflows/reusable-terraform-apply.yml` | Terraform apply, gated by a GitHub environment |
+| `.github/actions/version-calculate` | Version calculation used by the workflows |
+| `.github/actions/version-tag` | Annotated tag creation |
+| `.github/actions/aws-auth` | OIDC, with static-key fallback |
+| `.github/actions/bump-infra-tag` | Open a PR that bumps an image tag in `aws-infra` |
+
+A minimal GitHub consumer:
+
+```yaml
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  version:
+    if: github.ref == 'refs/heads/main'
+    uses: yola-org/ci-templates/.github/workflows/reusable-version.yml@v1
+    with:
+      tag: false
+    secrets: inherit
+
+  test:
+    uses: yola-org/ci-templates/.github/workflows/reusable-gradle.yml@v1
+
+  docker:
+    needs: [version, test]
+    uses: yola-org/ci-templates/.github/workflows/reusable-docker-ecr.yml@v1
+    with:
+      image-name: vestio/my-service
+      version: ${{ needs.version.outputs.version }}
+      artifact-name: gradle-build-libs
+    secrets: inherit
+```
+
+Required configuration (details in [MIGRATION.md](./MIGRATION.md)):
+
+* `AWS_ROLE_ARN` secret for OIDC, or `AWS_ACCESS_KEY_ID` +
+  `AWS_SECRET_ACCESS_KEY` as a fallback.
+* `ECR_REGISTRY` repository variable when the registry is not in the caller's
+  AWS account.
+* `INFRA_TOKEN` secret in the application repo for `bump-infra-tag`.
+* A `prod` environment with required reviewers for production applies.
+
+## GitLab CI (legacy)
+
+The original GitLab templates remain available while the migration is in
+progress.
 
 | File | Purpose |
 |------|---------|
@@ -12,7 +73,7 @@ in the `tech1212145` group.
 | `templates/infra-bump.yml` | Open an MR that bumps an image tag in `aws-infra` |
 | `templates/security.yml` | GitLab SAST + Secret Detection |
 
-## Quick start
+### Quick start (GitLab)
 
 Include only the files a project needs. Always include `version.yml` when
 using `docker.yml`, `gradle.yml`, or `infra-bump.yml`, because those jobs read

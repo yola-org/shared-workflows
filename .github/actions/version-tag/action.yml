@@ -1,0 +1,72 @@
+name: Create and push Git tag
+description: >-
+  Creates and pushes an annotated Git tag on the checked-out commit.
+  Port of .version:tag from templates/version.yml.
+
+inputs:
+  version:
+    description: Version without prefix, e.g. 1.2.0.
+    required: true
+  git-tag:
+    description: Full tag name, e.g. dev-1.2.0.
+    required: true
+  token:
+    description: Token with contents:write. Defaults to the checkout credentials.
+    required: false
+    default: ''
+  user-name:
+    description: Tag author name.
+    required: false
+    default: 'github-actions[bot]'
+  user-email:
+    description: Tag author email.
+    required: false
+    default: '41898282+github-actions[bot]@users.noreply.github.com'
+
+outputs:
+  tag:
+    description: The tag that was pushed.
+    value: ${{ steps.tag.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - id: tag
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        GIT_TAG: ${{ inputs.git-tag }}
+        TOKEN: ${{ inputs.token }}
+        GIT_USER_NAME: ${{ inputs.user-name }}
+        GIT_USER_EMAIL: ${{ inputs.user-email }}
+      run: |
+        set -euo pipefail
+
+        : "${VERSION:?version is required}"
+        : "${GIT_TAG:?git-tag is required}"
+
+        if ! git check-ref-format "refs/tags/${GIT_TAG}"; then
+          echo "::error::Invalid Git tag: ${GIT_TAG}"
+          exit 1
+        fi
+
+        git config user.name "${GIT_USER_NAME}"
+        git config user.email "${GIT_USER_EMAIL}"
+        git fetch --force --tags origin
+
+        if git ls-remote --exit-code --tags origin "refs/tags/${GIT_TAG}" >/dev/null 2>&1; then
+          echo "::error::Tag ${GIT_TAG} already exists."
+          exit 1
+        fi
+
+        git tag -a "${GIT_TAG}" -m "Release ${VERSION}"
+
+        if [ -n "$TOKEN" ]; then
+          git remote set-url origin \
+            "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        fi
+
+        git push origin "refs/tags/${GIT_TAG}"
+
+        echo "tag=${GIT_TAG}" >> "$GITHUB_OUTPUT"
+        echo "Pushed tag \`${GIT_TAG}\` for version \`${VERSION}\`." >> "$GITHUB_STEP_SUMMARY"

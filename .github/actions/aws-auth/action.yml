@@ -1,0 +1,75 @@
+name: Configure AWS credentials
+description: >-
+  Authenticates to AWS with GitHub OIDC when a role ARN is provided, and falls
+  back to static access keys otherwise. Exactly one method must be configured.
+
+inputs:
+  role-arn:
+    description: IAM role to assume through GitHub OIDC.
+    required: false
+    default: ''
+  aws-region:
+    description: AWS region.
+    required: false
+    default: 'ca-central-1'
+  access-key-id:
+    description: Static access key ID (fallback when role-arn is empty).
+    required: false
+    default: ''
+  secret-access-key:
+    description: Static secret access key (fallback when role-arn is empty).
+    required: false
+    default: ''
+  session-token:
+    description: Optional session token for temporary static credentials.
+    required: false
+    default: ''
+  role-session-name:
+    description: Session name used for the OIDC assume-role call.
+    required: false
+    default: 'github-actions'
+
+outputs:
+  method:
+    description: '"oidc" or "keys".'
+    value: ${{ steps.mode.outputs.method }}
+
+runs:
+  using: composite
+  steps:
+    - id: mode
+      shell: bash
+      env:
+        ROLE_ARN: ${{ inputs.role-arn }}
+        ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "$ROLE_ARN" ]; then
+          echo "use_oidc=true" >> "$GITHUB_ENV"
+          echo "method=oidc" >> "$GITHUB_OUTPUT"
+        elif [ -n "$ACCESS_KEY_ID" ] && [ -n "$SECRET_ACCESS_KEY" ]; then
+          echo "use_oidc=false" >> "$GITHUB_ENV"
+          echo "method=keys" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::Configure AWS_ROLE_ARN (OIDC) or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (static keys)."
+          exit 1
+        fi
+
+    - name: Configure credentials with OIDC
+      if: ${{ env.use_oidc == 'true' }}
+      uses: aws-actions/configure-aws-credentials@v6.3.0
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        role-session-name: ${{ inputs.role-session-name }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Configure credentials with static keys
+      if: ${{ env.use_oidc == 'false' }}
+      uses: aws-actions/configure-aws-credentials@v6.3.0
+      with:
+        aws-access-key-id: ${{ inputs.access-key-id }}
+        aws-secret-access-key: ${{ inputs.secret-access-key }}
+        aws-session-token: ${{ inputs.session-token }}
+        aws-region: ${{ inputs.aws-region }}

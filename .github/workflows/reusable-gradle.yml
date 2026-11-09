@@ -1,0 +1,91 @@
+name: Reusable · Gradle CI
+# Runs Gradle tests, then packages the application and uploads the build output. Port of templates/gradle.yml (JDK 25).
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: JDK version.
+        type: string
+        required: false
+        default: '25'
+      java-distribution:
+        description: JDK distribution.
+        type: string
+        required: false
+        default: 'temurin'
+      test-command:
+        description: Command that runs the unit tests.
+        type: string
+        required: false
+        default: './gradlew test'
+      build-command:
+        description: Command that packages the application.
+        type: string
+        required: false
+        default: './gradlew build -x test'
+      run-build:
+        description: Run the packaging job after tests.
+        type: boolean
+        required: false
+        default: true
+      artifact-name:
+        description: Name of the uploaded build artifact.
+        type: string
+        required: false
+        default: 'gradle-build-libs'
+      artifact-path:
+        description: Path(s) to upload, relative to the repository root.
+        type: string
+        required: false
+        default: 'build/libs/'
+      timeout-minutes:
+        description: Timeout for each job.
+        type: number
+        required: false
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+      - uses: gradle/actions/setup-gradle@v6.4.1
+      - name: Run tests
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ${{ inputs.test-command }}
+
+  build:
+    name: Package
+    needs: test
+    if: ${{ inputs.run-build }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+      - uses: gradle/actions/setup-gradle@v6.4.1
+      - name: Package
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ${{ inputs.build-command }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+          if-no-files-found: error
+          retention-days: 1

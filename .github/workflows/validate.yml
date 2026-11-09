@@ -1,0 +1,62 @@
+name: Validate shared workflows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download actionlint
+        shell: bash
+        run: |
+          curl -sSfL \
+            https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash |
+            bash -s -- 1.7.12
+      - name: Lint workflows
+        run: ./actionlint -color
+
+  yaml:
+    name: YAML syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install PyYAML
+        shell: bash
+        run: python3 -m pip install --user --quiet pyyaml
+      - name: Parse every workflow, action and template
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+
+          import yaml
+
+          failed = False
+          paths = sorted(
+              glob.glob(".github/workflows/*.yml")
+              + glob.glob(".github/actions/*/action.yml")
+              + glob.glob("templates/*.yml")
+          )
+
+          for path in paths:
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      list(yaml.safe_load_all(fh))
+                  print(f"OK   {path}")
+              except Exception as exc:  # noqa: BLE001
+                  failed = True
+                  print(f"FAIL {path}: {exc}")
+
+          sys.exit(1 if failed else 0)
+          PY

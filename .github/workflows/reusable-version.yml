@@ -1,0 +1,80 @@
+name: Reusable · semantic version
+# Calculates the next semantic version from Git tags and the commit title, with optional tag creation. Port of templates/version.yml.
+on:
+  workflow_call:
+    inputs:
+      prefix:
+        description: 'Version stream prefix, e.g. "dev-" or "prod-".'
+        type: string
+        required: false
+        default: ''
+      initial:
+        description: Version used when no tag exists for the stream.
+        type: string
+        required: false
+        default: '1.0.0'
+      bump:
+        description: 'major | minor | patch. Empty = detect from the commit title.'
+        type: string
+        required: false
+        default: ''
+      tag:
+        description: Create and push the tag in this workflow.
+        type: boolean
+        required: false
+        default: false
+      commit-message:
+        description: Commit message used for bump detection.
+        type: string
+        required: false
+        default: ''
+    outputs:
+      version:
+        description: Version without prefix.
+        value: ${{ jobs.calculate.outputs.version }}
+      git_tag:
+        description: Full tag name.
+        value: ${{ jobs.calculate.outputs.git_tag }}
+      bump:
+        description: Applied bump.
+        value: ${{ jobs.calculate.outputs.bump }}
+      latest_tag:
+        description: Latest tag found for the stream.
+        value: ${{ jobs.calculate.outputs.latest_tag }}
+    secrets:
+      RELEASE_TOKEN:
+        description: Optional token with contents:write, for protected branches.
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  calculate:
+    name: Calculate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      git_tag: ${{ steps.version.outputs.git_tag }}
+      bump: ${{ steps.version.outputs.bump }}
+      latest_tag: ${{ steps.version.outputs.latest_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: version
+        uses: yola-org/ci-templates/.github/actions/version-calculate@main
+        with:
+          prefix: ${{ inputs.prefix }}
+          initial: ${{ inputs.initial }}
+          bump: ${{ inputs.bump }}
+          commit-message: ${{ inputs.commit-message }}
+      - name: Create and push tag
+        if: ${{ inputs.tag }}
+        uses: yola-org/ci-templates/.github/actions/version-tag@main
+        with:
+          version: ${{ steps.version.outputs.version }}
+          git-tag: ${{ steps.version.outputs.git_tag }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}

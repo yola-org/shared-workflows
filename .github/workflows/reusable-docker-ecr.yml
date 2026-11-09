@@ -1,0 +1,173 @@
+name: Reusable · Docker build and ECR push
+# Builds a container image and pushes it to Amazon ECR with the release version and latest tags. Port of templates/docker.yml.
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: Repository name inside ECR, e.g. vestio/image-optimizer.
+        type: string
+        required: true
+      version:
+        description: Image tag.
+        type: string
+        required: true
+      ecr-registry:
+        description: ECR registry host. Empty = derive from the caller AWS account and region.
+        type: string
+        required: false
+        default: ''
+      aws-region:
+        description: AWS region.
+        type: string
+        required: false
+        default: 'ca-central-1'
+      dockerfile:
+        description: Path to the Dockerfile.
+        type: string
+        required: false
+        default: 'docker/Dockerfile'
+      context:
+        description: Docker build context.
+        type: string
+        required: false
+        default: '.'
+      build-args:
+        description: Newline-separated Docker build arguments.
+        type: string
+        required: false
+        default: ''
+      artifact-name:
+        description: Optional artifact to download before building (e.g. the packaged JAR).
+        type: string
+        required: false
+        default: ''
+      artifact-path:
+        description: Directory where the artifact is extracted.
+        type: string
+        required: false
+        default: 'build/libs'
+      tag-latest:
+        description: Also tag and push the image as latest.
+        type: boolean
+        required: false
+        default: true
+      push:
+        description: Push the image. Set false to build only.
+        type: boolean
+        required: false
+        default: true
+      timeout-minutes:
+        description: Job timeout.
+        type: number
+        required: false
+        default: 30
+    secrets:
+      AWS_ROLE_ARN:
+        description: IAM role assumed through GitHub OIDC.
+        required: false
+      AWS_ACCESS_KEY_ID:
+        description: Static access key fallback.
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: Static secret key fallback.
+        required: false
+      AWS_SESSION_TOKEN:
+        description: Optional session token for temporary static credentials.
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-push:
+    name: Build and push
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      AWS_REGION: ${{ inputs.aws-region }}
+      AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download build artifact
+        if: ${{ inputs.artifact-name != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Configure AWS credentials
+        uses: yola-org/ci-templates/.github/actions/aws-auth@main
+        with:
+          role-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+          access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Resolve registry and image
+        id: registry
+        shell: bash
+        env:
+          INPUT_REGISTRY: ${{ inputs.ecr-registry }}
+          IMAGE_NAME: ${{ inputs.image-name }}
+        run: |
+          set -euo pipefail
+
+          REGISTRY="$INPUT_REGISTRY"
+          if [ -z "$REGISTRY" ]; then
+            ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+            REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          fi
+
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          echo "image=${REGISTRY}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2.1.7
+        with:
+          registries: ${{ steps.registry.outputs.registry }}
+
+      - uses: docker/setup-buildx-action@v4.4.1
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        env:
+          IMAGE: ${{ steps.registry.outputs.image }}
+          VERSION: ${{ inputs.version }}
+          TAG_LATEST: ${{ inputs.tag-latest }}
+        run: |
+          set -euo pipefail
+          TAGS="${IMAGE}:${VERSION}"
+          if [ "$TAG_LATEST" = "true" ]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          build-args: ${{ inputs.build-args }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        shell: bash
+        env:
+          IMAGE: ${{ steps.registry.outputs.image }}
+          VERSION: ${{ inputs.version }}
+          PUSHED: ${{ inputs.push }}
+        run: |
+          {
+            echo "### Container image"
+            echo ""
+            echo "- Image: \`${IMAGE}\`"
+            echo "- Tags: \`${VERSION}\`$([ "$PUSHED" = "true" ] && echo ', `latest`' || true)"
+            echo "- Pushed: \`${PUSHED}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

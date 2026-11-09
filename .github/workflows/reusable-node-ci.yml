@@ -1,0 +1,189 @@
+name: Reusable · Node.js CI
+# Runs lint, typecheck, production build and an optional end-to-end suite for a Next.js project. The e2e job reuses the build artifact produced by the build job. Port of the vestio-web GitLab pipeline.
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version.
+        type: string
+        required: false
+        default: '22'
+      working-directory:
+        description: Directory containing package.json.
+        type: string
+        required: false
+        default: '.'
+      install-command:
+        description: Dependency install command.
+        type: string
+        required: false
+        default: 'npm ci'
+      lint-command:
+        description: Formatting/lint check command.
+        type: string
+        required: false
+        default: 'npx oxfmt --check .'
+      typecheck-command:
+        description: Type check command.
+        type: string
+        required: false
+        default: 'npx tsc --noEmit'
+      build-command:
+        description: Production build command.
+        type: string
+        required: false
+        default: 'npm run build'
+      e2e-command:
+        description: End-to-end test command. Runs with CI=true.
+        type: string
+        required: false
+        default: 'npm run test:e2e'
+      run-e2e:
+        description: Run the end-to-end job.
+        type: boolean
+        required: false
+        default: true
+      e2e-install-command:
+        description: Browser install command for the e2e job.
+        type: string
+        required: false
+        default: 'npx playwright install --with-deps chromium'
+      lint-continue-on-error:
+        description: Keep the lint job non-blocking (mirrors the GitLab allow_failure).
+        type: boolean
+        required: false
+        default: true
+      typecheck-continue-on-error:
+        description: Keep the typecheck job non-blocking.
+        type: boolean
+        required: false
+        default: true
+      e2e-continue-on-error:
+        description: Keep the e2e job non-blocking.
+        type: boolean
+        required: false
+        default: true
+      build-artifact-path:
+        description: Path(s) uploaded by the build job, relative to the repository root.
+        type: string
+        required: false
+        default: |
+          .next/
+          !.next/cache/
+      build-artifact-name:
+        description: Name of the build artifact.
+        type: string
+        required: false
+        default: 'nodejs-build'
+      report-paths:
+        description: Paths uploaded from the e2e job.
+        type: string
+        required: false
+        default: |
+          playwright-report/
+          test-results/
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: ${{ inputs.lint-continue-on-error }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - run: ${{ inputs.install-command }}
+      - run: ${{ inputs.lint-command }}
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: ${{ inputs.typecheck-continue-on-error }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - run: ${{ inputs.install-command }}
+      - run: ${{ inputs.typecheck-command }}
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - run: ${{ inputs.install-command }}
+      - run: ${{ inputs.build-command }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.build-artifact-name }}
+          path: ${{ inputs.build-artifact-path }}
+          # .next/ is a hidden directory; artifacts skip hidden files by default.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  e2e:
+    name: E2E
+    needs: build
+    if: ${{ inputs.run-e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: ${{ inputs.e2e-continue-on-error }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - run: ${{ inputs.install-command }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.build-artifact-name }}
+          path: ${{ inputs.working-directory }}/.next
+      - name: Install browsers
+        run: ${{ inputs.e2e-install-command }}
+      - name: Run e2e tests
+        env:
+          CI: 'true'
+        run: ${{ inputs.e2e-command }}
+      - name: Upload reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-reports
+          path: ${{ inputs.report-paths }}
+          if-no-files-found: ignore
+          retention-days: 7
