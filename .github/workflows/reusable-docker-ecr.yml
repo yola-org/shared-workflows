@@ -164,10 +164,14 @@ jobs:
           VERSION: ${{ inputs.version }}
           PUSHED: ${{ inputs.push }}
         run: |
+          LATEST=""
+          if [ "$PUSHED" = "true" ]; then
+            LATEST=", \`latest\`"
+          fi
           {
             echo "### Container image"
             echo ""
             echo "- Image: \`${IMAGE}\`"
-            echo "- Tags: \`${VERSION}\`$([ "$PUSHED" = "true" ] && echo ', `latest`' || true)"
+            echo "- Tags: \`${VERSION}\`${LATEST}"
             echo "- Pushed: \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"
