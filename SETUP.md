@@ -20,6 +20,7 @@ shared-workflows/
       reusable-docker-ecr.yml
       reusable-gradle.yml
       reusable-node-ci.yml
+      reusable-release-gate.yml
       reusable-terraform-apply.yml
       reusable-terraform-plan.yml
       reusable-version.yml
@@ -84,6 +85,8 @@ anything.
 | --- | --- | --- | --- |
 | all | `AWS_REGION` | no | repository variable (not a secret); the AWS workflows read `vars.AWS_REGION` automatically and fall back to `ca-central-1` |
 | lambda-image-optimizer | `ECR_REGISTRY` | no | defaults to `<account>.dkr.ecr.<region>.amazonaws.com` |
+| all | `RELEASE_BRANCH` | no | release branch for `reusable-release-gate.yml`; defaults to `main` |
+| all | `REQUIRE_MERGED_PR` | no | `true` by default; set to `false` to allow direct pushes to release |
 
 Set `AWS_REGION` under **Settings → Secrets and variables → Actions →
 Variables**, not under Secrets. The AWS workflows read it automatically and fall

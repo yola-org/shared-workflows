@@ -15,6 +15,7 @@ secrets/variables, environments and the AWS credentials configuration.
 |------|---------|
 | `.github/workflows/reusable-version.yml` | Semantic version calculation (+ optional tag) |
 | `.github/workflows/reusable-changed-paths.yml` | Detect changed files matching a regex |
+| `.github/workflows/reusable-release-gate.yml` | Release only for merged pull requests |
 | `.github/workflows/reusable-gradle.yml` | Gradle test + package (JDK 25) |
 | `.github/workflows/reusable-node-ci.yml` | Node lint/typecheck/build/e2e |
 | `.github/workflows/reusable-docker-ecr.yml` | Docker build + push to ECR |
@@ -109,6 +110,37 @@ jobs:
 The same logic is available as the `.github/actions/changed-paths` composite
 action when you want it inside an existing job. That action requires the
 repository to be checked out with `fetch-depth: 0`.
+
+### Release only after a merged pull request
+
+`reusable-release-gate.yml` returns `release=true` only for a push to the
+configured branch whose commit belongs to a merged pull request:
+
+```yaml
+jobs:
+  release-gate:
+    if: ${{ github.event_name == 'push' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: yola-org/shared-workflows/.github/workflows/reusable-release-gate.yml@main
+    with:
+      base-branch: ${{ vars.RELEASE_BRANCH || 'main' }}
+      require-merged-pr: ${{ vars.REQUIRE_MERGED_PR != 'false' }}
+
+  docker:
+    needs: [release-gate, changes, version, test]
+    if: >-
+      always() &&
+      needs.release-gate.outputs.release == 'true' &&
+      needs.changes.outputs.changed == 'true'
+    # ...
+```
+
+Set `REQUIRE_MERGED_PR=false` to allow direct pushes to release. The gate uses
+the GitHub API, so merge commits and squash merges are detected. Rebase merges
+are not reliably associated with the pull request; use merge/squash merges or
+disable the gate for those repositories.
 
 Rules for callers:
 
