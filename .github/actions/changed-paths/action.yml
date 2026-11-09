@@ -1,0 +1,75 @@
+name: Detect changed paths
+description: >-
+  Diffs the current event against its base commit and reports whether any
+  changed path matches a regular expression. Check out the repository with
+  fetch-depth: 0 before using this action.
+
+inputs:
+  patterns:
+    description: >-
+      POSIX extended regular expression matched against each changed file path.
+    required: true
+  base:
+    description: >-
+      Optional base commit SHA. Defaults to the pull request base, merge group
+      base or push before SHA.
+    required: false
+    default: ''
+
+outputs:
+  changed:
+    description: '"true" when at least one changed path matches, otherwise "false".'
+    value: ${{ steps.filter.outputs.changed }}
+  files:
+    description: Newline-separated list of changed files.
+    value: ${{ steps.filter.outputs.files }}
+
+runs:
+  using: composite
+  steps:
+    - id: filter
+      shell: bash
+      env:
+        PATTERNS: ${{ inputs.patterns }}
+        BASE_INPUT: ${{ inputs.base }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        MERGE_BASE: ${{ github.event.merge_group.base_sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        HEAD_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        : "${PATTERNS:?patterns is required}"
+
+        BASE="$BASE_INPUT"
+        if [ -z "$BASE" ]; then
+          case "$EVENT_NAME" in
+            pull_request) BASE="$PR_BASE" ;;
+            merge_group) BASE="$MERGE_BASE" ;;
+            *) BASE="$PUSH_BEFORE" ;;
+          esac
+        fi
+
+        if [ -z "$BASE" ] ||
+          [ "$BASE" = "0000000000000000000000000000000000000000" ] ||
+          ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+          BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+        fi
+
+        CHANGED="$(git diff --name-only "$BASE" "$HEAD_SHA")"
+        printf '%s\n' "$CHANGED" | sed 's/^/  /'
+
+        if printf '%s\n' "$CHANGED" | grep -Eq -- "$PATTERNS"; then
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        {
+          echo "files<<EOF"
+          if [ -n "$CHANGED" ]; then
+            printf '%s\n' "$CHANGED"
+          fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"

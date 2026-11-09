@@ -10,11 +10,13 @@ and caller examples.
 shared-workflows/
   .github/
     actions/
-      aws-auth/            # OIDC with static-key fallback
+      aws-auth/            # configures AWS credentials from static keys
       bump-infra-tag/      # opens the aws-infra PR
+      changed-paths/       # detects changed files for a regex
       version-calculate/   # semantic version + tag name
       version-tag/         # annotated tag push
     workflows/
+      reusable-changed-paths.yml
       reusable-docker-ecr.yml
       reusable-gradle.yml
       reusable-node-ci.yml
@@ -80,23 +82,37 @@ anything.
 
 | Repository | Variable | Required | Purpose |
 | --- | --- | --- | --- |
-| all | `AWS_REGION` | no | defaults to `ca-central-1` |
+| all | `AWS_REGION` | no | repository variable (not a secret); the AWS workflows read `vars.AWS_REGION` automatically and fall back to `ca-central-1` |
 | lambda-image-optimizer | `ECR_REGISTRY` | no | defaults to `<account>.dkr.ecr.<region>.amazonaws.com` |
-| aws-infra | `IMAGE_OPTIMIZER_IMAGE_TAG` | prod only | `TF_VAR_image_optimizer_image_tag` when `envs/prod/terraform.tfvars` is absent. Dev always reads `envs/dev/terraform.tfvars`. |
+
+Set `AWS_REGION` under **Settings → Secrets and variables → Actions →
+Variables**, not under Secrets. The AWS workflows read it automatically and fall
+back to `ca-central-1`. Callers can also pass it explicitly:
+
+```yaml
+with:
+  aws-region: ${{ vars.AWS_REGION }}
+```
 
 ## 5. Secrets
 
-Preferred (OIDC):
-
 | Repository | Secret | Purpose |
 | --- | --- | --- |
-| all | `AWS_ROLE_ARN` | role assumed through GitHub OIDC |
-| lambda-image-optimizer | `INFRA_TOKEN` | fine-grained PAT with **Contents: write** and **Pull requests: write** on `yola-org/aws-infra` |
-| all | `RELEASE_TOKEN` | optional PAT with **Contents: write**, only if branch protection blocks `GITHUB_TOKEN` tag pushes |
+| all | `AWS_ACCESS_KEY_ID` | static AWS access key ID |
+| all | `AWS_SECRET_ACCESS_KEY` | static AWS secret access key |
+| all | `INFRA_GITHUB_TOKEN` | PAT with **Contents: write** on the repository and **Contents: write** + **Pull requests: write** on `yola-org/aws-infra`; used for tag pushes and infra bumps. Falls back to `GITHUB_TOKEN` for tags when unset. |
 
-Fallback (static keys): set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
-instead of `AWS_ROLE_ARN`. The `aws-auth` action picks whichever is configured
-and fails with a clear message when neither is present.
+All entries above must be stored under **Settings → Secrets and variables →
+Actions → Secrets**. `INFRA_GITHUB_TOKEN` is read as
+`secrets.INFRA_GITHUB_TOKEN`, so a repository variable with the same name will
+not work.
+
+The AWS workflows pass these keys to the `aws-auth` action, which fails with a
+clear message when either one is missing. Create a dedicated IAM user for CI
+with only the permissions each pipeline needs (ECR push for
+`lambda-image-optimizer`, Terraform apply permissions for `aws-infra`) and store
+its programmatic access keys as the two secrets above. Rotate the keys
+periodically.
 
 ## 6. Environments and branch protection
 
@@ -105,52 +121,21 @@ and fails with a clear message when neither is present.
   restrict deployment branches to `prod`.
 * Protect `dev` and `prod` in `aws-infra` (no direct pushes, require PRs).
 
-## 7. IAM OIDC provider and role
+## 7. IAM user and access keys
 
-Create the GitHub OIDC provider once per AWS account:
+Create a dedicated IAM user for CI and generate an access key pair:
 
-```text
-Provider URL: https://token.actions.githubusercontent.com
-Audience:     sts.amazonaws.com
+```bash
+aws iam create-user --user-name github-actions-ci
+
+aws iam create-access-key --user-name github-actions-ci
+# Copy AccessKeyId and SecretAccessKey from the output.
 ```
 
-Trust policy (narrow the `sub` condition per repository/environment):
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:yola-org/*:*"
-        }
-      }
-    }
-  ]
-}
-```
-
-Tighter subjects (one per job, since plan jobs use a branch ref and apply jobs
-use an environment):
-
-* `repo:yola-org/lambda-image-optimizer:ref:refs/heads/main` — ECR push.
-* `repo:yola-org/aws-infra:ref:refs/heads/dev` — dev plan.
-* `repo:yola-org/aws-infra:environment:dev` — dev apply.
-* `repo:yola-org/aws-infra:ref:refs/heads/prod` — prod plan.
-* `repo:yola-org/aws-infra:environment:prod` — prod apply.
-
-The role needs the permissions the CI user had: ECR push for the lambda
-repository, and the full Terraform apply permissions for `aws-infra`. The OIDC
-role must at least cover the resources in `envs/dev` and `envs/prod`.
+Attach only the policies each pipeline needs. The ECR push user needs ECR push
+permissions; the Terraform user needs the permissions for the resources in
+`envs/dev` and `envs/prod`. Store the key pair as the repository secrets
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (see section 5).
 
 ## Example pipelines
 
@@ -160,8 +145,9 @@ role must at least cover the resources in `envs/dev` and `envs/prod`.
 * Push to `main`, app files changed: version calculation → Docker build/push to
   ECR (`<version>` and `latest`) → annotated tag → PR bumping
   `image_optimizer_image_tag` in `aws-infra` `dev`.
-* App-change filter: `src/`, `docker/`, `build.gradle(.kts)`, `settings.gradle(.kts)`,
-  `gradle.properties`, `gradlew(.bat)`, `gradle/`, `buildSrc/`.
+* App-change filter (`reusable-changed-paths.yml`): `src/`, `docker/`,
+  `build.gradle(.kts)`, `settings.gradle(.kts)`, `gradle.properties`,
+  `gradlew(.bat)`, `gradle/`, `buildSrc/`, `Dockerfile`, `.dockerignore`.
 * A docs/CI-only push does not push an image, tag, or open a PR.
 
 ### vestio-backend
@@ -200,12 +186,9 @@ override the commit-based detection.
 ## Notes and caveats
 
 * Tags pushed with the default `GITHUB_TOKEN` do not trigger new workflow runs.
-  That is intentional.
+  That is intentional. When `INFRA_GITHUB_TOKEN` is set, tags are pushed with
+  that PAT and do trigger workflows.
 * Merge commits (`Merge branch 'x' into 'dev'`) count as patch bumps. Use
   squash/fast-forward merges if you want the PR title to drive the bump.
-* `envs/prod` has no committed `terraform.tfvars`, and
-  `image_optimizer_image_tag` has no default. Set the
-  `IMAGE_OPTIMIZER_IMAGE_TAG` repository variable (or commit the tfvars file)
-  before the first prod plan.
 * `terraform apply` only runs from the `dev`/`prod` push pipelines. Pull
   requests and `main` never receive cloud credentials.

@@ -42,8 +42,8 @@ on:
         description: Latest tag found for the stream.
         value: ${{ jobs.calculate.outputs.latest_tag }}
     secrets:
-      RELEASE_TOKEN:
-        description: Optional token with contents:write, for protected branches.
+      INFRA_GITHUB_TOKEN:
+        description: Optional PAT with contents:write, used for tag pushes and infra bumps. Falls back to github.token.
         required: false
 
 permissions:
@@ -77,4 +77,4 @@ jobs:
         with:
           version: ${{ steps.version.outputs.version }}
           git-tag: ${{ steps.version.outputs.git_tag }}
-          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          token: ${{ secrets.INFRA_GITHUB_TOKEN || github.token }}

@@ -16,10 +16,10 @@ on:
         type: string
         required: true
       aws-region:
-        description: AWS region.
+        description: AWS region. Defaults to the AWS_REGION repository variable.
         type: string
         required: false
-        default: 'ca-central-1'
+        default: ${{ vars.AWS_REGION || 'ca-central-1' }}
       terraform-version:
         description: Terraform CLI version.
         type: string
@@ -36,22 +36,15 @@ on:
         required: false
         default: 30
     secrets:
-      AWS_ROLE_ARN:
-        description: IAM role assumed through GitHub OIDC.
-        required: false
       AWS_ACCESS_KEY_ID:
-        description: Static access key fallback.
-        required: false
+        description: Static AWS access key ID.
+        required: true
       AWS_SECRET_ACCESS_KEY:
-        description: Static secret key fallback.
-        required: false
-      AWS_SESSION_TOKEN:
-        description: Optional session token for temporary static credentials.
-        required: false
+        description: Static AWS secret access key.
+        required: true
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   apply:
@@ -74,11 +67,9 @@ jobs:
       - name: Configure AWS credentials
         uses: yola-org/shared-workflows/.github/actions/aws-auth@main
         with:
-          role-arn: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
           access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
       - uses: hashicorp/setup-terraform@v4.0.1
         with:

@@ -5,7 +5,7 @@ in the `yola-org` organization. Repositories in the organization call them
 directly instead of copying CI code into every project.
 
 See [SETUP.md](./SETUP.md) for the one-time repository setup, required
-secrets/variables, environments and the AWS OIDC configuration.
+secrets/variables, environments and the AWS credentials configuration.
 
 ## Available building blocks
 
@@ -14,6 +14,7 @@ secrets/variables, environments and the AWS OIDC configuration.
 | Path | Purpose |
 |------|---------|
 | `.github/workflows/reusable-version.yml` | Semantic version calculation (+ optional tag) |
+| `.github/workflows/reusable-changed-paths.yml` | Detect changed files matching a regex |
 | `.github/workflows/reusable-gradle.yml` | Gradle test + package (JDK 25) |
 | `.github/workflows/reusable-node-ci.yml` | Node lint/typecheck/build/e2e |
 | `.github/workflows/reusable-docker-ecr.yml` | Docker build + push to ECR |
@@ -29,7 +30,8 @@ another repository with a job-level `uses:`.
 |------|---------|
 | `.github/actions/version-calculate` | Version calculation used by the workflows |
 | `.github/actions/version-tag` | Annotated tag creation |
-| `.github/actions/aws-auth` | OIDC, with static-key fallback |
+| `.github/actions/changed-paths` | Detect changed files matching a regex |
+| `.github/actions/aws-auth` | Configure AWS credentials from static keys |
 | `.github/actions/bump-infra-tag` | Open a PR that bumps an image tag in `aws-infra` |
 
 ## Calling from another repository
@@ -62,7 +64,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   version:
@@ -81,16 +82,40 @@ jobs:
     with:
       image-name: vestio/my-service
       version: ${{ needs.version.outputs.version }}
+      aws-region: ${{ vars.AWS_REGION }}
       artifact-name: gradle-build-libs
     secrets: inherit
 ```
+
+### Detect changed paths
+
+`reusable-changed-paths.yml` diffs the caller's event against its base commit
+and exposes a `changed` boolean. The `patterns` input is a POSIX extended
+regular expression matched against each changed path:
+
+```yaml
+jobs:
+  changes:
+    uses: yola-org/shared-workflows/.github/workflows/reusable-changed-paths.yml@main
+    with:
+      patterns: '(^|/)(src/|docker/|build\.gradle|gradlew|gradle/|Dockerfile)'
+
+  docker:
+    needs: [changes, version, test]
+    if: needs.changes.outputs.changed == 'true'
+    # ...
+```
+
+The same logic is available as the `.github/actions/changed-paths` composite
+action when you want it inside an existing job. That action requires the
+repository to be checked out with `fetch-depth: 0`.
 
 Rules for callers:
 
 * `uses:` must be a job-level key; it cannot be used as a step.
 * Pass secrets with `secrets: inherit` or list them explicitly under `secrets:`.
 * The caller must grant the permissions the reusable workflow needs
-  (`contents: write` for tagging, `id-token: write` for OIDC).
+  (`contents: write` for tagging).
 * Reusable workflows are only resolved from the specified ref. If you call
   `@v1`, the `v1` tag must exist in this repository.
 
@@ -104,19 +129,21 @@ jobs:
       - uses: actions/checkout@v7
       - uses: yola-org/shared-workflows/.github/actions/aws-auth@main
         with:
-          role-arn: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ca-central-1
+          aws-region: ${{ vars.AWS_REGION }}
+          access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 ```
 
 ## Required configuration
 
 Details are in [SETUP.md](./SETUP.md):
 
-* `AWS_ROLE_ARN` secret for OIDC, or `AWS_ACCESS_KEY_ID` +
-  `AWS_SECRET_ACCESS_KEY` as a fallback.
+* `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` secrets for AWS access.
+* `AWS_REGION` repository variable for the AWS region (not a secret). The AWS
+  workflows read it automatically and fall back to `ca-central-1`.
 * `ECR_REGISTRY` repository variable when the registry is not in the caller's
   AWS account.
-* `INFRA_TOKEN` secret in the application repository for `bump-infra-tag`.
+* `INFRA_GITHUB_TOKEN` secret for release tagging and `bump-infra-tag`.
 * A `prod` environment with required reviewers for production applies.
 
 ## Pinning a release

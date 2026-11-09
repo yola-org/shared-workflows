@@ -1,0 +1,37 @@
+name: Reusable · changed paths
+# Diffs the caller event against its base commit and exposes whether any
+# changed path matches the given regular expression.
+on:
+  workflow_call:
+    inputs:
+      patterns:
+        description: POSIX extended regular expression matched against changed file paths.
+        type: string
+        required: true
+    outputs:
+      changed:
+        description: '"true" when at least one changed path matches, otherwise "false".'
+        value: ${{ jobs.filter.outputs.changed }}
+      files:
+        description: Newline-separated list of changed files.
+        value: ${{ jobs.filter.outputs.files }}
+
+permissions:
+  contents: read
+
+jobs:
+  filter:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.filter.outputs.changed }}
+      files: ${{ steps.filter.outputs.files }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        uses: yola-org/shared-workflows/.github/actions/changed-paths@main
+        with:
+          patterns: ${{ inputs.patterns }}
