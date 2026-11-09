@@ -1,7 +1,6 @@
 name: Create and push Git tag
 description: >-
   Creates and pushes an annotated Git tag on the checked-out commit.
-  Port of .version:tag from templates/version.yml.
 
 inputs:
   version:

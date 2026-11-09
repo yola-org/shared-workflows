@@ -1,5 +1,5 @@
 name: Reusable · Docker build and ECR push
-# Builds a container image and pushes it to Amazon ECR with the release version and latest tags. Port of templates/docker.yml.
+# Builds a container image and pushes it to Amazon ECR with the release version and latest tags.
 on:
   workflow_call:
     inputs:
@@ -98,7 +98,7 @@ jobs:
           path: ${{ inputs.artifact-path }}
 
       - name: Configure AWS credentials
-        uses: yola-org/ci-templates/.github/actions/aws-auth@main
+        uses: yola-org/shared-workflows/.github/actions/aws-auth@main
         with:
           role-arn: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}

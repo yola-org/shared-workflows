@@ -1,5 +1,5 @@
 name: Reusable · Node.js CI
-# Runs lint, typecheck, production build and an optional end-to-end suite for a Next.js project. The e2e job reuses the build artifact produced by the build job. Port of the vestio-web GitLab pipeline.
+# Runs lint, typecheck, production build and an optional end-to-end suite for a Next.js project. The e2e job reuses the build artifact produced by the build job.
 on:
   workflow_call:
     inputs:
@@ -49,7 +49,7 @@ on:
         required: false
         default: 'npx playwright install --with-deps chromium'
       lint-continue-on-error:
-        description: Keep the lint job non-blocking (mirrors the GitLab allow_failure).
+        description: Keep the lint job non-blocking.
         type: boolean
         required: false
         default: true

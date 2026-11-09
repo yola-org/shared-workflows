@@ -1,22 +1,19 @@
-# GitLab CI → GitHub Actions migration
+# Setup and consumer guide
 
-The GitHub workflows are committed **alongside** the existing `.gitlab-ci.yml`
-files. GitLab keeps working exactly as before until you delete those files, so
-the migration can be verified without downtime.
-
-Everything shared lives in this repository (`yola-org/ci-templates`), the same
-way `templates/*.yml` did for GitLab.
+One-time configuration for `yola-org/shared-workflows` and the repositories that
+consume it. See [README.md](./README.md) for the available workflows, actions
+and caller examples.
 
 ## Repository layout
 
 ```text
-ci-templates/
+shared-workflows/
   .github/
     actions/
       aws-auth/            # OIDC with static-key fallback
-      bump-infra-tag/      # opens the aws-infra PR (was infra-bump.yml)
-      version-calculate/   # semantic version + tag name (was version:calculate)
-      version-tag/         # annotated tag push (was .version:tag)
+      bump-infra-tag/      # opens the aws-infra PR
+      version-calculate/   # semantic version + tag name
+      version-tag/         # annotated tag push
     workflows/
       reusable-docker-ecr.yml
       reusable-gradle.yml
@@ -25,66 +22,61 @@ ci-templates/
       reusable-terraform-plan.yml
       reusable-version.yml
       validate.yml         # actionlint + YAML validation for this repo
+  README.md
+  SETUP.md
 ```
 
-## GitLab → GitHub mapping
+## 1. Create the repositories
 
-| GitLab | GitHub |
-| --- | --- |
-| `templates/version.yml` | `reusable-version.yml` + `version-calculate` / `version-tag` actions |
-| `templates/gradle.yml` | `reusable-gradle.yml` |
-| `templates/docker.yml` | `reusable-docker-ecr.yml` |
-| `templates/infra-bump.yml` | `bump-infra-tag` action |
-| GitLab merge request pipelines | `pull_request` triggers |
-| `rules:changes` | small `changes` job that diffs the pushed commit |
-| `rules: if: $CI_COMMIT_BRANCH == "dev"` | `on.push.branches` + job `if` |
-| manual `terraform-apply-prod` | `prod` environment with required reviewers |
-| dotenv artifacts | reusable workflow outputs |
-| `ACCESS_TOKEN` + MR API | `INFRA_TOKEN` + `gh pr create` |
-| GitLab SAST / Secret Detection | not migrated |
-
-## One-time setup
-
-### 1. Create the repositories
-
-Create these private repositories under `yola-org` and push the local trees:
+Create these private repositories under `yola-org`:
 
 ```text
-yola-org/ci-templates
+yola-org/shared-workflows
 yola-org/aws-infra
 yola-org/vestio-web
 yola-org/vestio-backend
 yola-org/lambda-image-optimizer
 ```
 
-Push tags as well (`git push --tags`), otherwise the first release starts from
-`1.0.0` instead of continuing the current stream.
+Push tags as well (`git push --tags`) if you want version streams to continue
+from the current release instead of starting at `1.0.0`.
 
-### 2. Allow cross-repository workflows
+## 2. Allow cross-repository workflows
 
-In `yola-org/ci-templates` → **Settings → Actions → General → Access**, choose
-**Accessible from repositories in the yola-org organization**. Without this the
-consumers cannot call the reusable workflows.
+In `yola-org/shared-workflows` → **Settings → Actions → General → Access**,
+choose **Accessible from repositories in the yola-org organization**.
 
-### 3. Pin the shared workflows
+Without this, a private shared repository cannot be resolved by consumers and
+the calling job fails with `workflow not found`.
 
-They currently reference `@main` because no release tag exists yet. After the
-first push, create a tag and replace every reference:
+This is the supported path for all `yola-org` repositories. The caller uses:
 
-```bash
-git tag -a v1 -m "ci-templates v1"
-git push origin v1
-
-# in ci-templates AND every consumer repository (the reusable workflows also
-# reference the shared actions by full name, so this repo must be updated too)
-grep -rl 'yola-org/ci-templates.*@main' .github |
-  xargs sed -i 's#\(yola-org/ci-templates/[^@]*\)@main#\1@v1#g'
+```yaml
+uses: yola-org/shared-workflows/.github/workflows/reusable-gradle.yml@main
 ```
 
-Run that in `ci-templates` as well, otherwise `reusable-*.yml@v1` would keep
-calling the actions from `main` and the pin would not mean anything.
+and can use `secrets: inherit`, because the caller and called workflow are in
+the same organization.
 
-### 4. Repository variables
+## 3. Pin the shared workflows
+
+The examples use `@main` because no release tag is created automatically. After
+the first push, create a tag and replace the references:
+
+```bash
+git tag -a v1 -m "shared-workflows v1"
+git push origin v1
+
+# Run this in shared-workflows AND in every consumer repository.
+grep -rl 'yola-org/shared-workflows.*@main' .github |
+  xargs sed -i 's#\(yola-org/shared-workflows/[^@]*\)@main#\1@v1#g'
+```
+
+Run the replacement in this repository as well. Otherwise `reusable-*.yml@v1`
+would keep calling the composite actions from `main` and the pin would not mean
+anything.
+
+## 4. Repository variables
 
 | Repository | Variable | Required | Purpose |
 | --- | --- | --- | --- |
@@ -92,7 +84,7 @@ calling the actions from `main` and the pin would not mean anything.
 | lambda-image-optimizer | `ECR_REGISTRY` | no | defaults to `<account>.dkr.ecr.<region>.amazonaws.com` |
 | aws-infra | `IMAGE_OPTIMIZER_IMAGE_TAG` | prod only | `TF_VAR_image_optimizer_image_tag` when `envs/prod/terraform.tfvars` is absent. Dev always reads `envs/dev/terraform.tfvars`. |
 
-### 5. Secrets
+## 5. Secrets
 
 Preferred (OIDC):
 
@@ -106,15 +98,14 @@ Fallback (static keys): set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
 instead of `AWS_ROLE_ARN`. The `aws-auth` action picks whichever is configured
 and fails with a clear message when neither is present.
 
-### 6. Environments and branch protection
+## 6. Environments and branch protection
 
 * `envs/dev` → create a `dev` environment (no reviewers).
 * `envs/prod` → create a `prod` environment with **required reviewers** and
-  restrict deployment branches to `prod`. This replaces the manual
-  `terraform-apply-prod` job.
+  restrict deployment branches to `prod`.
 * Protect `dev` and `prod` in `aws-infra` (no direct pushes, require PRs).
 
-### 7. IAM OIDC provider and role
+## 7. IAM OIDC provider and role
 
 Create the GitHub OIDC provider once per AWS account:
 
@@ -157,12 +148,11 @@ use an environment):
 * `repo:yola-org/aws-infra:ref:refs/heads/prod` — prod plan.
 * `repo:yola-org/aws-infra:environment:prod` — prod apply.
 
-The role needs the permissions the old GitLab CI user had: ECR push for the
-lambda repository, and the full Terraform apply permissions for `aws-infra`.
-The GitLab setup used an AWS admin user; the OIDC role must at least cover the
-resources in `envs/dev` and `envs/prod`.
+The role needs the permissions the CI user had: ECR push for the lambda
+repository, and the full Terraform apply permissions for `aws-infra`. The OIDC
+role must at least cover the resources in `envs/dev` and `envs/prod`.
 
-## Pipeline behavior
+## Example pipelines
 
 ### lambda-image-optimizer
 
@@ -183,7 +173,7 @@ resources in `envs/dev` and `envs/prod`.
 
 * Every push/PR: `npm ci`, `oxfmt --check`, `tsc --noEmit`, `next build`, then
   Playwright against `next start` with the mock backend.
-* Lint, typecheck and e2e are non-blocking, matching the GitLab `allow_failure`.
+* Lint, typecheck and e2e are non-blocking.
 
 ### aws-infra
 
@@ -195,9 +185,7 @@ resources in `envs/dev` and `envs/prod`.
   `prod-X.Y.Z` tag when `.tf` or `.tfvars` files changed.
 * Push to `main`: validation only.
 
-### Version calculation
-
-Identical to the GitLab template:
+## Version calculation
 
 | Commit title | Bump |
 | --- | --- |
@@ -206,25 +194,13 @@ Identical to the GitLab template:
 | anything else | patch |
 
 With a prefix, only tags for that stream are considered; if none exist the
-stream starts at `1.0.0` (`dev-1.0.0`, `prod-1.0.0`). `VERSION_BUMP` is not
-used by the GitHub workflows; pass the `bump` input if you need an override.
-
-## Deleting GitLab CI
-
-Verify the GitHub pipelines first, then remove the old file in each repository:
-
-```bash
-git rm .gitlab-ci.yml
-git commit -m "chore(ci): remove GitLab pipeline"
-```
-
-The files are kept in git history, so `git checkout <sha>~1 -- .gitlab-ci.yml`
-restores one if needed.
+stream starts at `1.0.0` (`dev-1.0.0`, `prod-1.0.0`). Pass the `bump` input to
+override the commit-based detection.
 
 ## Notes and caveats
 
 * Tags pushed with the default `GITHUB_TOKEN` do not trigger new workflow runs.
-  That is intentional and mirrors `git push -o ci.skip`.
+  That is intentional.
 * Merge commits (`Merge branch 'x' into 'dev'`) count as patch bumps. Use
   squash/fast-forward merges if you want the PR title to drive the bump.
 * `envs/prod` has no committed `terraform.tfvars`, and

@@ -33,7 +33,7 @@ jobs:
       - name: Install PyYAML
         shell: bash
         run: python3 -m pip install --user --quiet pyyaml
-      - name: Parse every workflow, action and template
+      - name: Parse every workflow and action
         shell: bash
         run: |
           python3 - <<'PY'
@@ -46,7 +46,6 @@ jobs:
           paths = sorted(
               glob.glob(".github/workflows/*.yml")
               + glob.glob(".github/actions/*/action.yml")
-              + glob.glob("templates/*.yml")
           )
 
           for path in paths:

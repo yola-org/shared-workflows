@@ -1,5 +1,5 @@
 name: Reusable · semantic version
-# Calculates the next semantic version from Git tags and the commit title, with optional tag creation. Port of templates/version.yml.
+# Calculates the next semantic version from Git tags and the commit title, with optional tag creation.
 on:
   workflow_call:
     inputs:
@@ -65,7 +65,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
       - id: version
-        uses: yola-org/ci-templates/.github/actions/version-calculate@main
+        uses: yola-org/shared-workflows/.github/actions/version-calculate@main
         with:
           prefix: ${{ inputs.prefix }}
           initial: ${{ inputs.initial }}
@@ -73,7 +73,7 @@ jobs:
           commit-message: ${{ inputs.commit-message }}
       - name: Create and push tag
         if: ${{ inputs.tag }}
-        uses: yola-org/ci-templates/.github/actions/version-tag@main
+        uses: yola-org/shared-workflows/.github/actions/version-tag@main
         with:
           version: ${{ steps.version.outputs.version }}
           git-tag: ${{ steps.version.outputs.git_tag }}

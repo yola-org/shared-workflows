@@ -2,7 +2,7 @@ name: Bump image tag in aws-infra
 description: >-
   Clones the infra repository, updates an image tag in a tfvars file, pushes a
   branch, and opens a pull request. Re-running is safe: the branch is reset and
-  an existing open PR is reused. Port of templates/infra-bump.yml.
+  an existing open PR is reused.
 
 inputs:
   component:

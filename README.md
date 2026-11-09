@@ -1,14 +1,15 @@
-# Shared CI templates
+# Shared GitHub workflows
 
-Reusable CI/CD building blocks for the Vestio projects, for both GitHub
-Actions and GitLab CI. See [MIGRATION.md](./MIGRATION.md) for the migration
-plan, required secrets/variables, and the OIDC setup.
+Reusable GitHub Actions workflows and composite actions for the Vestio projects
+in the `yola-org` organization. Repositories in the organization call them
+directly instead of copying CI code into every project.
 
-## GitHub Actions
+See [SETUP.md](./SETUP.md) for the one-time repository setup, required
+secrets/variables, environments and the AWS OIDC configuration.
 
-Reusable workflows and composite actions live under `.github/`. Consumers in
-the `yola-org` organization call them with a literal reference; pin a tag
-instead of `main` once one exists.
+## Available building blocks
+
+### Reusable workflows
 
 | Path | Purpose |
 |------|---------|
@@ -18,14 +19,47 @@ instead of `main` once one exists.
 | `.github/workflows/reusable-docker-ecr.yml` | Docker build + push to ECR |
 | `.github/workflows/reusable-terraform-plan.yml` | Terraform plan + saved plan artifact |
 | `.github/workflows/reusable-terraform-apply.yml` | Terraform apply, gated by a GitHub environment |
+
+Every reusable workflow declares `on: workflow_call`, so it can be invoked from
+another repository with a job-level `uses:`.
+
+### Composite actions
+
+| Path | Purpose |
+|------|---------|
 | `.github/actions/version-calculate` | Version calculation used by the workflows |
 | `.github/actions/version-tag` | Annotated tag creation |
 | `.github/actions/aws-auth` | OIDC, with static-key fallback |
 | `.github/actions/bump-infra-tag` | Open a PR that bumps an image tag in `aws-infra` |
 
-A minimal GitHub consumer:
+## Calling from another repository
+
+A consumer in the same organization references the full path:
+
+```text
+yola-org/shared-workflows/.github/workflows/<workflow>.yml@<ref>
+yola-org/shared-workflows/.github/actions/<action>@<ref>
+```
+
+`<ref>` is a branch, tag or commit SHA in **this** repository. Use `@main` while
+no release tag exists; pin a tag (for example `@v1`) once one is created. A
+reference to a ref or path that does not exist fails with
+`workflow not found`, so double-check the repository name, file path and ref.
+
+For private repositories, the workflow repository must allow access from the
+organization. See [SETUP.md](./SETUP.md#2-allow-cross-repository-workflows).
+
+### Reusable workflow example
 
 ```yaml
+# .github/workflows/ci.yml in the consumer repository
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
 permissions:
   contents: write
   id-token: write
@@ -33,17 +67,17 @@ permissions:
 jobs:
   version:
     if: github.ref == 'refs/heads/main'
-    uses: yola-org/ci-templates/.github/workflows/reusable-version.yml@v1
+    uses: yola-org/shared-workflows/.github/workflows/reusable-version.yml@main
     with:
       tag: false
     secrets: inherit
 
   test:
-    uses: yola-org/ci-templates/.github/workflows/reusable-gradle.yml@v1
+    uses: yola-org/shared-workflows/.github/workflows/reusable-gradle.yml@main
 
   docker:
     needs: [version, test]
-    uses: yola-org/ci-templates/.github/workflows/reusable-docker-ecr.yml@v1
+    uses: yola-org/shared-workflows/.github/workflows/reusable-docker-ecr.yml@main
     with:
       image-name: vestio/my-service
       version: ${{ needs.version.outputs.version }}
@@ -51,172 +85,55 @@ jobs:
     secrets: inherit
 ```
 
-Required configuration (details in [MIGRATION.md](./MIGRATION.md)):
+Rules for callers:
+
+* `uses:` must be a job-level key; it cannot be used as a step.
+* Pass secrets with `secrets: inherit` or list them explicitly under `secrets:`.
+* The caller must grant the permissions the reusable workflow needs
+  (`contents: write` for tagging, `id-token: write` for OIDC).
+* Reusable workflows are only resolved from the specified ref. If you call
+  `@v1`, the `v1` tag must exist in this repository.
+
+### Composite action example
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: yola-org/shared-workflows/.github/actions/aws-auth@main
+        with:
+          role-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ca-central-1
+```
+
+## Required configuration
+
+Details are in [SETUP.md](./SETUP.md):
 
 * `AWS_ROLE_ARN` secret for OIDC, or `AWS_ACCESS_KEY_ID` +
   `AWS_SECRET_ACCESS_KEY` as a fallback.
 * `ECR_REGISTRY` repository variable when the registry is not in the caller's
   AWS account.
-* `INFRA_TOKEN` secret in the application repo for `bump-infra-tag`.
+* `INFRA_TOKEN` secret in the application repository for `bump-infra-tag`.
 * A `prod` environment with required reviewers for production applies.
 
-## GitLab CI (legacy)
+## Pinning a release
 
-The original GitLab templates remain available while the migration is in
-progress.
+Create a tag in this repository, then replace `@main` in consumer repositories
+(and in the internal action references in `.github/workflows/`):
 
-| File | Purpose |
-|------|---------|
-| `templates/version.yml` | Semantic version calculation and Git tag creation |
-| `templates/gradle.yml` | Gradle test + package jobs (JDK 25) |
-| `templates/docker.yml` | Docker build + push to ECR |
-| `templates/infra-bump.yml` | Open an MR that bumps an image tag in `aws-infra` |
-| `templates/security.yml` | GitLab SAST + Secret Detection |
+```bash
+git tag -a v1 -m "shared-workflows v1"
+git push origin v1
 
-### Quick start (GitLab)
-
-Include only the files a project needs. Always include `version.yml` when
-using `docker.yml`, `gradle.yml`, or `infra-bump.yml`, because those jobs read
-the `VERSION` variable produced by `version:calculate`.
-
-```yaml
-include:
-  - project: "tech1212145/ci-templates"
-    ref: master # prefer a tag in the long term
-    file:
-      - templates/version.yml
-      - templates/gradle.yml
-      - templates/docker.yml
-      - templates/infra-bump.yml
+grep -rl 'yola-org/shared-workflows.*@main' .github |
+  xargs sed -i 's#\(yola-org/shared-workflows/[^@]*\)@main#\1@v1#g'
 ```
 
-A minimal Lambda-style pipeline:
-
-```yaml
-stages: [test, build, release]
-
-workflow:
-  rules:
-    - if: $CI_COMMIT_TAG
-      when: never
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
-      when: never
-    - if: $CI_COMMIT_BRANCH
-
-test:
-  extends: .gradle-test
-
-build:
-  extends: .gradle-build
-
-docker-build-push:
-  extends: .docker-build-push-ecr
-  variables:
-    DOCKER_IMAGE_NAME: my-service
-
-git-tag:
-  extends: .version:tag
-  needs:
-    - job: version:calculate
-      artifacts: true
-    - job: docker-build-push
-```
-
-`.version:tag` defaults to the default branch (and `VERSION_SKIP=true` disables
-it), so the example above does not need extra rules.
-
-## `version.yml`
-
-### `version:calculate` (ready to run)
-
-Runs in `.pre` on the default branch and exports `VERSION` and `GIT_TAG`
-through a dotenv artifact.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VERSION_PREFIX` | `""` | Prefix for independent streams, e.g. `dev-`, `prod-` |
-| `VERSION_INITIAL` | `1.0.0` | Version used when no matching tag exists |
-| `VERSION_BUMP` | from commit title | `major`, `minor`, or `patch` |
-| `VERSION_SKIP` | unset | `true` disables the job |
-
-Version bump detection:
-
-- `!feat:` / `feat!:` → major
-- `feat:` → minor
-- anything else → patch
-
-Override the rules by redefining the job in the consuming repo:
-
-```yaml
-version:calculate:
-  rules:
-    - if: $CI_COMMIT_BRANCH == "develop"
-```
-
-> **Rules gotcha:** GitLab evaluates `rules` in order and uses the first match.
-> If no rule matches, the job is **not added** to the pipeline. A rule list
-> with only a conditional `when: never` entry therefore excludes the job from
-> every pipeline. Always end with a positive rule, or use
-> `- when: on_success`.
-
-### `.version:tag` (template)
-
-Creates and pushes an annotated tag. It defaults to the default branch and is
-disabled by `VERSION_SKIP=true`; override `rules` to tag another branch. It has
-no default `needs`, so in the `.post` stage it automatically inherits dotenv
-variables from earlier jobs. Add `needs` when the tag must wait for a specific
-job, and list `version:calculate` there explicitly — dotenv variables are
-**not** inherited transitively through another job.
-
-## `gradle.yml`
-
-| Job | Description |
-|-----|-------------|
-| `.gradle-test` | Runs `./gradlew test` |
-| `.gradle-build` | Runs `./gradlew build -x test` and stores `build/libs/` |
-
-`GRADLE_IMAGE` defaults to `gradle:9-jdk25`. Gradle caches are stored in
-`.gradle/` and reused across pipelines. `.gradle-build` has no default
-`needs`, so it runs after the `test` stage and still receives `VERSION` from
-`version:calculate` in `.pre`. If you add `needs` to the build job, list
-`version:calculate` explicitly; on MR pipelines (where it does not exist) use
-`optional: true` and the build falls back to `0.0.0-SNAPSHOT`.
-
-## `docker.yml`
-
-`.docker-build-push-ecr` builds and pushes `<registry>/<image>:$VERSION` and
-`:latest`. It runs on the default branch only and is skipped when
-`VERSION_SKIP=true`.
-
-Required variables:
-
-- `DOCKER_IMAGE_NAME` (job variable)
-- `DOCKER_REGISTRY`, `AWS_DEFAULT_REGION` (CI/CD variables)
-- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (CI/CD variables)
-
-Optional: `DOCKERFILE_PATH` (default `docker/Dockerfile`),
-`DOCKER_BUILD_CONTEXT` (default `.`).
-
-## `infra-bump.yml`
-
-`.update-infra-image-tag` clones `INFRA_PROJECT_PATH`, updates
-`INFRA_TF_VAR_KEY` in `INFRA_TARGET_FILE`, pushes a branch, and opens a merge
-request. Re-running is safe: the branch is reset and an existing open MR is
-reused.
-
-Required: `INFRA_COMPONENT`, `INFRA_TF_VAR_KEY`, `ACCESS_TOKEN`.
-
-Optional: `INFRA_PROJECT_PATH` (default `aws-infra`),
-`INFRA_TARGET_BRANCH` (default `dev`),
-`INFRA_TARGET_FILE` (default `envs/dev/terraform.tfvars`),
-`INFRA_ENV_LABEL` (default `dev`).
-
-## `security.yml`
-
-Includes GitLab's SAST and Secret Detection templates. The consumer must have
-`test` and `secret-detection` in its `stages`, or rely on the stages defined
-in this file. Set `AST_ENABLE_MR_PIPELINES=true` to also scan merge requests.
+Run the replacement in this repository as well. Otherwise a consumer calling
+`reusable-*.yml@v1` still resolves the composite actions from `main`.
 
 ## Licence
 

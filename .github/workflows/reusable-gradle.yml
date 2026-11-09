@@ -1,5 +1,5 @@
 name: Reusable · Gradle CI
-# Runs Gradle tests, then packages the application and uploads the build output. Port of templates/gradle.yml (JDK 25).
+# Runs Gradle tests, then packages the application and uploads the build output (JDK 25).
 on:
   workflow_call:
     inputs:

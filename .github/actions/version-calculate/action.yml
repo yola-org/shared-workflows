@@ -1,8 +1,8 @@
 name: Calculate semantic version
 description: >-
   Computes the next semantic version from Git tags and the commit title.
-  Port of templates/version.yml. Requires a full checkout
-  (actions/checkout with fetch-depth: 0 and fetch-tags: true).
+  Requires a full checkout (actions/checkout with fetch-depth: 0 and
+  fetch-tags: true).
 
 inputs:
   prefix:
