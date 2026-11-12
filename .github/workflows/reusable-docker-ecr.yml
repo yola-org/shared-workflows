@@ -125,9 +125,11 @@ jobs:
             ACCOUNT="${REGISTRY%%.*}"
           fi
 
-          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
-          echo "image=${REGISTRY}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
-          echo "account=${ACCOUNT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "registry=${REGISTRY}"
+            echo "image=${REGISTRY}/${IMAGE_NAME}"
+            echo "account=${ACCOUNT}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2.1.7
