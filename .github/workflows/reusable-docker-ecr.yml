@@ -36,6 +36,16 @@ on:
         type: string
         required: false
         default: ''
+      platforms:
+        description: Optional comma-separated target platforms for the build.
+        type: string
+        required: false
+        default: ''
+      provenance:
+        description: Optional Buildx provenance setting. Use 'false' for Lambda images.
+        type: string
+        required: false
+        default: ''
       artifact-name:
         description: Optional artifact to download before building (e.g. the packaged JAR).
         type: string
@@ -147,6 +157,8 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
           build-args: ${{ inputs.build-args }}
+          platforms: ${{ inputs.platforms }}
+          provenance: ${{ inputs.provenance }}
           push: ${{ inputs.push }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
