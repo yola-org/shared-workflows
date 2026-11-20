@@ -2,6 +2,10 @@ name: Reusable · Gradle CI
 # Runs Gradle tests, then packages the application and uploads the build output (JDK 25).
 on:
   workflow_call:
+    secrets:
+      PACKAGES_READ_TOKEN:
+        description: Optional token with read access to private Maven packages.
+        required: false
     inputs:
       java-version:
         description: JDK version.
@@ -46,6 +50,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  PACKAGES_READ_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
 
 jobs:
   test:
